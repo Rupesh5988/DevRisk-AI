@@ -34,5 +34,12 @@ coverage/
 *.sln
 *.sw?
 
-# PDFs
+# PDFs and Docs
 *.pdf
+*.md
+*.tex
+*.docx
+*.rtf
+
+# Allow README
+!README.md
