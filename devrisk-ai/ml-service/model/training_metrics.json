@@ -1,0 +1,49 @@
+{
+  "auc_roc": 0.857,
+  "accuracy": 0.8187,
+  "f1_score": 0.5504,
+  "precision": 0.4549,
+  "recall": 0.6966,
+  "decision_threshold": 0.34,
+  "cost_reduction_pct": 11.39,
+  "test_size": 21335,
+  "test_buggy_count": 3398,
+  "confusion_matrix": [
+    [
+      15101,
+      2836
+    ],
+    [
+      1031,
+      2367
+    ]
+  ],
+  "cv_auc_roc_mean": 0.8572,
+  "cv_auc_roc_std": 0.0216,
+  "train_minimized_cost": 33722.0,
+  "feature_columns": [
+    "ns",
+    "nd",
+    "nf",
+    "entropy",
+    "la",
+    "ld",
+    "lt",
+    "fix",
+    "ndev",
+    "age",
+    "nuc",
+    "exp",
+    "rexp",
+    "sexp",
+    "churn_density",
+    "la_ratio",
+    "exp_per_file",
+    "recent_exp_ratio",
+    "exp_vs_complexity",
+    "subsystem_familiarity",
+    "churn_intensity",
+    "dev_density_risk"
+  ],
+  "training_date": "2026-08-06T06:22:15.976740"
+}
