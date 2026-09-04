@@ -34,6 +34,7 @@ class ExplanationItem(BaseModel):
     shap_value: float
     feature_value: float
     explanation: str
+    direction: Optional[str] = None
 
 
 class ExplainRequest(BaseModel):
@@ -51,6 +52,8 @@ class ExplainResponse(BaseModel):
     shap_values: List[float] = Field(..., description="Raw SHAP values for each feature")
     explanations: List[ExplanationItem] = Field(..., description="Human-readable explanations")
     base_value: float = Field(..., description="Base prediction value (average model output)")
+    risk_escalators: Optional[List[ExplanationItem]] = Field(default=None, description="Top positive risk drivers")
+    safety_factors: Optional[List[ExplanationItem]] = Field(default=None, description="Top negative mitigating factors")
 
 
 class HealthResponse(BaseModel):

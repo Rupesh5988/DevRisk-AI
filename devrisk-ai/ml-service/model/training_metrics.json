@@ -1,26 +1,25 @@
 {
-  "auc_roc": 0.857,
-  "accuracy": 0.8187,
-  "f1_score": 0.5504,
-  "precision": 0.4549,
-  "recall": 0.6966,
-  "decision_threshold": 0.34,
-  "cost_reduction_pct": 11.39,
+  "auc_roc": 0.8666,
+  "pr_auc": 0.661,
+  "brier_score": 0.116,
+  "accuracy": 0.8218,
+  "f1_score": 0.5686,
+  "precision": 0.4707,
+  "recall": 0.718,
+  "decision_threshold": 0.48,
+  "cost_reduction_pct": 0.82,
   "test_size": 21335,
-  "test_buggy_count": 3398,
+  "test_buggy_count": 3489,
   "confusion_matrix": [
     [
-      15101,
-      2836
+      15029,
+      2817
     ],
     [
-      1031,
-      2367
+      984,
+      2505
     ]
   ],
-  "cv_auc_roc_mean": 0.8572,
-  "cv_auc_roc_std": 0.0216,
-  "train_minimized_cost": 33722.0,
   "feature_columns": [
     "ns",
     "nd",
@@ -43,7 +42,16 @@
     "exp_vs_complexity",
     "subsystem_familiarity",
     "churn_intensity",
-    "dev_density_risk"
+    "dev_density_risk",
+    "diffusion_factor",
+    "churn_asymmetry",
+    "churn_per_file",
+    "fragility_index",
+    "subsystem_entropy",
+    "rexp_vs_sexp"
   ],
-  "training_date": "2026-08-06T06:22:15.976740"
+  "training_date": "2026-09-04T20:50:33.045713",
+  "cv_auc_roc_mean": 0.8521,
+  "cv_auc_roc_std": 0.0229,
+  "train_minimized_cost": 5566.0
 }

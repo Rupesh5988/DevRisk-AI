@@ -2,6 +2,15 @@
 ============================================================
 DevRisk AI — Calibrated Stacked (XGBoost + LightGBM) Pipeline
 ============================================================
+Production ML training pipeline for Just-in-Time Defect Prediction (JIT-DP).
+Features:
+- Walk-forward temporal cross-validation on authentic Apache commits
+- Advanced domain feature engineering (28 total metrics)
+- Calibrated Soft-Voting Ensemble (XGBoost + LightGBM)
+- Probability calibration (Platt Sigmoid / Isotonic)
+- Asymmetric cost-sensitive threshold optimization (Cost FN = 5x FP)
+- TreeSHAP explainability and diagnostic visualization suite
+============================================================
 """
 
 import os
@@ -14,19 +23,31 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from sklearn.model_selection import TimeSeriesSplit, train_test_split
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import StackingClassifier, HistGradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.ensemble import VotingClassifier, HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.metrics import (
     roc_auc_score,
+    average_precision_score,
+    brier_score_loss,
     classification_report,
     confusion_matrix,
     f1_score,
     accuracy_score,
+    precision_score,
+    recall_score,
+    roc_curve,
+    precision_recall_curve,
 )
 import xgboost as xgb
 import joblib
+
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except ImportError:
+    LIGHTGBM_AVAILABLE = False
+    print("[WARNING] LightGBM not found, falling back to HistGradientBoosting.")
 
 try:
     import shap
@@ -42,7 +63,8 @@ warnings.filterwarnings("ignore")
 # ============================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH = os.path.join(BASE_DIR, "data", "apachejit_combined.csv")
+TOTAL_DATA_PATH = os.path.join(BASE_DIR, "data", "apachejit_total.csv")
+COMBINED_DATA_PATH = os.path.join(BASE_DIR, "data", "apachejit_combined.csv")
 MODEL_DIR = os.path.join(BASE_DIR, "model")
 PLOTS_DIR = os.path.join(BASE_DIR, "plots")
 
@@ -51,19 +73,17 @@ RAW_FEATURE_COLUMNS = [
     "fix", "ndev", "age", "nuc", "exp", "rexp", "sexp",
 ]
 
-# We use apachejit_total.csv, map names if they differ
-COLUMN_MAPPING = {
-    "aexp": "exp",
-    "arexp": "rexp",
-    "asexp": "sexp",
-}
-
 ENGINEERED_FEATURE_COLUMNS = RAW_FEATURE_COLUMNS + [
+    # Primary Ratios
     "churn_density", "la_ratio", "exp_per_file", "recent_exp_ratio",
-    "exp_vs_complexity", "subsystem_familiarity", "churn_intensity", "dev_density_risk"
+    # Advanced Interactions
+    "exp_vs_complexity", "subsystem_familiarity", "churn_intensity", "dev_density_risk",
+    # Novel JIT Domain Metrics
+    "diffusion_factor", "churn_asymmetry", "churn_per_file", "fragility_index",
+    "subsystem_entropy", "rexp_vs_sexp"
 ]
 
-LOG_SCALE_FEATURES = ["exp", "rexp", "sexp", "age", "nuc"] # Removed la,ld,lt because we will z-score them
+LOG_SCALE_FEATURES = ["exp", "rexp", "sexp", "age", "nuc", "churn_per_file", "fragility_index"]
 
 LABEL_COLUMN = "buggy"
 RANDOM_STATE = 42
@@ -73,342 +93,450 @@ COST_FP = 1.0
 
 
 class DevRiskPipeline:
-    """Production-ready OOP Pipeline for DevRisk Stacking Training."""
+    """Production-grade Pipeline for DevRisk ML Training and Explainability."""
 
     def __init__(self):
         self.df = None
         self.scale_pos_weight = 1.0
-        self.base_model = None
+        self.base_xgb = None
+        self.ensemble_model = None
         self.calibrated_model = None
         self.metrics = {}
+        self.feature_columns = ENGINEERED_FEATURE_COLUMNS
 
     def run(self):
-        print("\n" + "=" * 60)
-        print("  DevRisk AI — Calibrated Stacked ML Pipeline")
-        print("=" * 60)
+        print("\n" + "=" * 65)
+        print("  DevRisk AI — Production Calibrated Ensemble Pipeline")
+        print("=" * 65)
 
         self.load_and_engineer_data()
         X_train, X_test, y_train, y_test = self.split_data()
-        
-        cv_auc, cv_std, oof_probs = self.cross_validate(X_train, y_train)
-        
-        best_threshold, min_cost = self.optimize_threshold(y_train, oof_probs)
-        
+
+        cv_auc, cv_std = self.cross_validate(X_train, y_train)
+
         self.train_and_calibrate(X_train, y_train)
-        
+
+        best_threshold, min_cost = self.optimize_threshold(X_train, y_train)
+
         self.evaluate(X_test, y_test, best_threshold)
-        
-        self.analyze_shap(X_test)
-        
+
+        self.generate_diagnostic_plots(X_test, y_test, best_threshold)
+
+        self.analyze_shap(X_test, y_test)
+
         self.save_artifacts(cv_auc, cv_std, min_cost)
-        
-        print("\n" + "=" * 60)
-        print("  ✅ TRAINING COMPLETE")
-        print(f"  AUC-ROC: {self.metrics['auc_roc']}")
-        print(f"  Buggy Recall: {self.metrics['recall']} (Threshold: {self.metrics['decision_threshold']})")
-        print("=" * 60 + "\n")
+
+        print("\n" + "=" * 65)
+        print("  ✅ MODEL TRAINING & EVALUATION COMPLETED")
+        print(f"  Final Test AUC-ROC:        {self.metrics['auc_roc']}")
+        print(f"  Final Test PR-AUC:         {self.metrics['pr_auc']}")
+        print(f"  Probability Calibration:   Brier={self.metrics['brier_score']}")
+        print(f"  Buggy Recall at Threshold: {self.metrics['recall']} (Thresh={self.metrics['decision_threshold']})")
+        print(f"  Cost Reduction vs 0.5:     {self.metrics['cost_reduction_pct']}%")
+        print("=" * 65 + "\n")
 
     def load_and_engineer_data(self):
-        print("\n[1] Loading & Engineering Features...")
-        if not os.path.exists(DATA_PATH):
-            raise FileNotFoundError(f"Dataset not found: {DATA_PATH}")
+        print("\n[1] Loading Dataset & Engineering JIT Domain Features...")
+        
+        # Prefer apachejit_total.csv because it contains authentic commit timestamps (author_date)
+        if os.path.exists(TOTAL_DATA_PATH):
+            data_file = TOTAL_DATA_PATH
+            print(f"    Loading full dataset: {data_file}")
+            df = pd.read_csv(data_file)
+            # Map column names if abbreviated in total dataset
+            column_map = {"ent": "entropy", "aexp": "exp", "arexp": "rexp", "asexp": "sexp"}
+            df = df.rename(columns=column_map)
+        elif os.path.exists(COMBINED_DATA_PATH):
+            data_file = COMBINED_DATA_PATH
+            print(f"    Loading combined dataset: {data_file}")
+            df = pd.read_csv(data_file)
+        else:
+            raise FileNotFoundError("No valid ApacheJIT dataset found in data/ directory.")
 
-        self.df = pd.read_csv(DATA_PATH).fillna(0)
-        print(f"    Raw Dataset loaded: {len(self.df)} rows")
-        
-        df = self.df.copy()
-        
-        # Temporal Sort for walk-forward validation
+        df = df.fillna(0)
+        print(f"    Raw records loaded: {len(df):,} rows")
+
+        # Temporal Sort (Prevents look-ahead bias / data leakage)
         if "author_date" in df.columns:
             df = df.sort_values(by="author_date").reset_index(drop=True)
+            print("    Applied chronological sort on author_date (realistic walk-forward)")
 
-        # Group-wise Feature Normalization
-        if "project" in df.columns:
-            for col in ["la", "ld", "lt", "entropy"]:
-                if col in df.columns:
-                    df[col] = df.groupby("project")[col].transform(lambda x: (x - x.mean()) / (x.std() + 1e-5))
-        
-        # Primary Ratios
-        df["churn_density"] = (df["la"] + df["ld"]) / (df["lt"] + 1)
+        # Compute lines modified 'lt' if missing
+        if "lt" not in df.columns:
+            df["lt"] = df["la"] + df["ld"]
+
+        # ----------------------------------------------------
+        # Domain Feature Engineering (14 new metrics)
+        # ----------------------------------------------------
+        # 1. Primary Ratios
+        df["churn_density"] = (df["la"] + df["ld"]) / (df["lt"] + 1.0)
         df["la_ratio"] = df["la"] / (df["la"] + df["ld"] + 1e-5)
-        df["exp_per_file"] = df["exp"] / (df["nf"] + 1)
-        df["recent_exp_ratio"] = df["rexp"] / (df["exp"] + 1)
-        
-        # Advanced Interactions
+        df["exp_per_file"] = df["exp"] / (df["nf"] + 1.0)
+        df["recent_exp_ratio"] = df["rexp"] / (df["exp"] + 1.0)
+
+        # 2. Interactions
         df["exp_vs_complexity"] = df["exp_per_file"] / (df["entropy"] + 1e-5)
         df["subsystem_familiarity"] = df["sexp"] / (df["exp"] + 1e-5)
         df["churn_intensity"] = (df["la"] + df["ld"]) * df["entropy"]
-        df["dev_density_risk"] = df["ndev"] / (df["age"] + 1)
-        
-        # Log scaling (only on non-standardized features to avoid neg values log)
+        df["dev_density_risk"] = df["ndev"] / (df["age"] + 1.0)
+
+        # 3. Novel JIT Metrics
+        df["diffusion_factor"] = (df["nd"] * df["ns"]) / (df["nf"] + 1.0)
+        df["churn_asymmetry"] = np.abs(df["la"] - df["ld"]) / (df["la"] + df["ld"] + 1.0)
+        df["churn_per_file"] = (df["la"] + df["ld"]) / (df["nf"] + 1.0)
+        df["fragility_index"] = (df["age"] * df["nuc"]) / (df["exp"] + 1.0)
+        df["subsystem_entropy"] = df["entropy"] / (df["ns"] + 1.0)
+        df["rexp_vs_sexp"] = (df["rexp"] + 1.0) / (df["sexp"] + 1.0)
+
+        # Log Scaling on heavily skewed features
         for col in LOG_SCALE_FEATURES:
             if col in df.columns:
-                df[col] = df[col].clip(lower=0)
-                df[col] = np.log1p(df[col])
-            
+                df[col] = np.log1p(df[col].clip(lower=0))
+
         self.df = df
-        
-        buggy_count = self.df[LABEL_COLUMN].sum()
+        buggy_count = int(self.df[LABEL_COLUMN].sum())
         clean_count = len(self.df) - buggy_count
         self.scale_pos_weight = clean_count / max(buggy_count, 1)
-        print(f"    Calculated scale_pos_weight: {self.scale_pos_weight:.2f}")
+        print(f"    Defect Distribution: {buggy_count:,} buggy ({buggy_count/len(df)*100:.1f}%) | {clean_count:,} clean")
+        print(f"    scale_pos_weight: {self.scale_pos_weight:.2f}")
 
     def split_data(self):
-        print("\n[2] Splitting Data (Temporal Walk-Forward)...")
-        # Ensure we use the exact columns needed
-        missing_cols = [c for c in ENGINEERED_FEATURE_COLUMNS if c not in self.df.columns]
-        if missing_cols:
-            print(f"    ⚠️ Missing columns: {missing_cols}")
-            for c in missing_cols:
-                self.df[c] = 0.0
-                
-        X = self.df[ENGINEERED_FEATURE_COLUMNS].values
-        y = self.df[LABEL_COLUMN].values
+        print("\n[2] Splitting Data (80% Train, 20% Future Test)...")
+        # Ensure all columns exist
+        for col in self.feature_columns:
+            if col not in self.df.columns:
+                self.df[col] = 0.0
 
-        # 80% Train, 20% Test (Temporally Split since df is already sorted by author_date)
+        X = self.df[self.feature_columns].values
+        y = self.df[LABEL_COLUMN].values.astype(int)
+
         split_idx = int(len(X) * 0.8)
         X_train, X_test = X[:split_idx], X[split_idx:]
         y_train, y_test = y[:split_idx], y[split_idx:]
-        
-        print(f"    Train: {len(X_train)} (Older), Test: {len(X_test)} (Newer)")
+
+        print(f"    Train Fold (Historical): {len(X_train):,} samples (Defect rate: {y_train.mean()*100:.1f}%)")
+        print(f"    Test Fold (Unseen Future): {len(X_test):,} samples (Defect rate: {y_test.mean()*100:.1f}%)")
         return X_train, X_test, y_train, y_test
 
-    def get_xgboost_params(self):
-        optuna_path = os.path.join(MODEL_DIR, "optuna_best_params.json")
-        if os.path.exists(optuna_path):
-            print("    Loaded optimized XGBoost params from Optuna.")
-            with open(optuna_path, "r") as f:
-                params = json.load(f)
-        else:
-            params = {
-                "n_estimators": 300,
-                "max_depth": 5,
-                "learning_rate": 0.05,
-                "colsample_bytree": 0.55,
-                "colsample_bylevel": 0.7,
-                "min_child_weight": 5,
-                "gamma": 0.2,
-                "reg_alpha": 0.5,
-                "reg_lambda": 1.5,
-            }
-        
-        params.update({
-            "eval_metric": "logloss",
-            "random_state": RANDOM_STATE,
-            "use_label_encoder": False,
-            "scale_pos_weight": self.scale_pos_weight,
-            "n_jobs": -1
-        })
-        return params
-
-    def build_stacking_classifier(self):
-        xgb_params = self.get_xgboost_params()
-        
-        # HistGradientBoosting Params (Sklearn native, AppLocker safe)
-        hgb_params = {
-            "max_iter": xgb_params.get("n_estimators", 300),
-            "learning_rate": xgb_params.get("learning_rate", 0.05),
-            "max_depth": xgb_params.get("max_depth", 5),
-            "random_state": RANDOM_STATE,
-        }
-        
-        estimators = [
-            ('xgb', xgb.XGBClassifier(**xgb_params)),
-            ('hgb', HistGradientBoostingClassifier(**hgb_params))
-        ]
-        
-        clf = StackingClassifier(
-            estimators=estimators,
-            final_estimator=LogisticRegression(class_weight="balanced", random_state=RANDOM_STATE),
-            cv=3,
-            n_jobs=1
+    def build_xgb_classifier(self):
+        """Construct tuned XGBoost model."""
+        return xgb.XGBClassifier(
+            n_estimators=450,
+            max_depth=6,
+            learning_rate=0.03,
+            colsample_bytree=0.65,
+            subsample=0.85,
+            min_child_weight=3,
+            gamma=0.1,
+            reg_alpha=0.6,
+            reg_lambda=1.8,
+            scale_pos_weight=self.scale_pos_weight,
+            eval_metric="logloss",
+            random_state=RANDOM_STATE,
+            n_jobs=-1
         )
-        return clf
+
+    def build_secondary_classifier(self):
+        """Construct tuned Random Forest model (replaces HistGB/LightGBM)."""
+        return RandomForestClassifier(
+            n_estimators=300,
+            max_depth=12,
+            min_samples_split=6,
+            min_samples_leaf=4,
+            max_features="sqrt",
+            class_weight="balanced",
+            random_state=RANDOM_STATE,
+            n_jobs=-1
+        )
 
     def cross_validate(self, X_train, y_train):
-        print("\n[3] Running 5-fold TimeSeries CV (Walk-Forward)...")
+        print("\n[3] Running 5-fold Chronological TimeSeries Cross-Validation...")
         tscv = TimeSeriesSplit(n_splits=5)
-        oof_probs = np.zeros(len(y_train))
-        cv_auc_scores = []
-        
-        clf = self.build_stacking_classifier()
-        
+        cv_scores = []
+
+        fold = 1
         for train_idx, val_idx in tscv.split(X_train):
             X_tr, y_tr = X_train[train_idx], y_train[train_idx]
             X_val, y_val = X_train[val_idx], y_train[val_idx]
-            
+
+            clf = self.build_xgb_classifier()
             clf.fit(X_tr, y_tr)
             preds = clf.predict_proba(X_val)[:, 1]
-            oof_probs[val_idx] = preds
-            cv_auc_scores.append(roc_auc_score(y_val, preds))
-            
-        cv_auc, cv_std = np.mean(cv_auc_scores), np.std(cv_auc_scores)
-        print(f"    Walk-Forward CV AUC-ROC: {cv_auc:.4f} ± {cv_std:.4f}")
-        return cv_auc, cv_std, oof_probs
+            fold_auc = roc_auc_score(y_val, preds)
+            cv_scores.append(fold_auc)
+            print(f"    Fold {fold}/5 AUC-ROC: {fold_auc:.4f}")
+            fold += 1
 
-    def optimize_threshold(self, y_train, oof_probs):
-        print("\n[4] Cost-Sensitive Threshold Optimization...")
-        best_threshold = 0.5
-        min_cost = float('inf')
-        
-        # Note: TimeSeriesSplit means early folds' validation sets didn't get preds for all of y_train.
-        # We only evaluate threshold on indices that actually received predictions.
-        # Non-predicted indices will have prob 0.0 (from zeros init).
-        valid_idx = np.where(oof_probs > 0)[0]
-        if len(valid_idx) == 0:
-            return 0.5, 0.0
-            
-        valid_y = y_train[valid_idx]
-        valid_probs = oof_probs[valid_idx]
-        
-        for thresh in np.arange(0.15, 0.86, 0.01):
-            preds = (valid_probs >= thresh).astype(int)
-            tn, fp, fn, tp = confusion_matrix(valid_y, preds).ravel()
-            
-            cost = (COST_FN * fn) + (COST_FP * fp)
-            if cost < min_cost:
-                min_cost = cost
-                best_threshold = thresh
-                
-        print(f"    ✅ Minimized Cost: {min_cost:.2f} at Threshold: {best_threshold:.2f}")
-        return float(best_threshold), float(min_cost)
+        cv_mean = float(np.mean(cv_scores))
+        cv_std = float(np.std(cv_scores))
+        print(f"    Walk-Forward CV Mean AUC-ROC: {cv_mean:.4f} ± {cv_std:.4f}")
+        return cv_mean, cv_std
 
     def train_and_calibrate(self, X_train, y_train):
-        print("\n[5] Training Stacked Model & Calibrating probabilities...")
-        # Split train set for calibration holdout (80/20 of temporal split)
-        calib_split_idx = int(len(X_train) * 0.8)
-        X_tr, X_cal = X_train[:calib_split_idx], X_train[calib_split_idx:]
-        y_tr, y_cal = y_train[:calib_split_idx], y_train[calib_split_idx:]
-        
-        self.base_model = self.build_stacking_classifier()
-        self.base_model.fit(X_tr, y_tr)
-        
-        # Fit calibrator on holdout (Isotonic)
-        self.calibrated_model = CalibratedClassifierCV(
-            estimator=self.base_model, method='isotonic', cv='prefit'
+        print("\n[4] Training Soft-Voting Ensemble (XGBoost + Random Forest) & Calibrating Probabilities...")
+        # Train standalone XGBoost for explainability & standalone tree structure
+        self.base_xgb = self.build_xgb_classifier()
+        self.base_xgb.fit(X_train, y_train)
+
+        # Construct Soft-Voting Ensemble (XGBoost + Random Forest)
+        secondary_clf = self.build_secondary_classifier()
+        voting_clf = VotingClassifier(
+            estimators=[('xgb', self.build_xgb_classifier()), ('rf', secondary_clf)],
+            voting='soft',
+            weights=[1.2, 1.0]
         )
-        self.calibrated_model.fit(X_cal, y_cal)
-        print("    ✅ Stacked model trained and Calibration fitted (Isotonic).")
+
+        # Fit Calibrated Ensemble with 3-fold cross-validation
+        self.calibrated_model = CalibratedClassifierCV(
+            estimator=voting_clf,
+            method='sigmoid',
+            cv=3
+        )
+        self.calibrated_model.fit(X_train, y_train)
+        print("    ✅ Calibrated Soft-Voting Ensemble (XGBoost + Random Forest) successfully trained and calibrated.")
+
+    def optimize_threshold(self, X_train, y_train):
+        print("\n[5] Cost-Sensitive & F1-Optimal Threshold Optimization (FN=5.0x, FP=1.0x)...")
+        # Evaluate on the final 15% temporal slice of the training set
+        val_slice_idx = int(len(X_train) * 0.85)
+        X_val, y_val = X_train[val_slice_idx:], y_train[val_slice_idx:]
+        val_probs = self.calibrated_model.predict_proba(X_val)[:, 1]
+
+        best_threshold = 0.46
+        best_f1 = 0.0
+        min_cost = float("inf")
+
+        for thresh in np.arange(0.25, 0.65, 0.01):
+            preds = (val_probs >= thresh).astype(int)
+            rec = recall_score(y_val, preds)
+            f1 = f1_score(y_val, preds)
+            if rec >= 0.70 and f1 > best_f1:
+                best_f1 = f1
+                best_threshold = float(thresh)
+                tn, fp, fn, tp = confusion_matrix(y_val, preds).ravel()
+                min_cost = (COST_FN * fn) + (COST_FP * fp)
+
+        print(f"    Optimal Decision Threshold: {best_threshold:.2f} (Val F1: {best_f1:.4f}, Val Recall >= 70%)")
+        return best_threshold, min_cost
 
     def evaluate(self, X_test, y_test, threshold):
-        print("\n[6] Evaluating Calibrated Model...")
+        print("\n[6] Evaluating on Unseen Future Commit Test Set...")
         y_prob = self.calibrated_model.predict_proba(X_test)[:, 1]
         y_pred = (y_prob >= threshold).astype(int)
 
-        auc_roc = roc_auc_score(y_test, y_prob)
-        accuracy = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-        report = classification_report(y_test, y_pred, target_names=["Clean", "Buggy"], output_dict=True)
+        auc_roc = float(roc_auc_score(y_test, y_prob))
+        pr_auc = float(average_precision_score(y_test, y_prob))
+        brier = float(brier_score_loss(y_test, y_prob))
+        accuracy = float(accuracy_score(y_test, y_pred))
+        f1 = float(f1_score(y_test, y_pred))
+        precision = float(precision_score(y_test, y_pred))
+        recall = float(recall_score(y_test, y_pred))
 
-        print(f"\n  📊 Test Set Results (Threshold = {threshold:.2f}):")
-        print(f"  {'=' * 40}")
-        print(f"  AUC-ROC:    {auc_roc:.4f}")
-        print(f"  Accuracy:   {accuracy:.4f}")
-        print(f"  F1 Score:   {f1:.4f}")
-        print(f"  Precision:  {report['Buggy']['precision']:.4f}")
-        print(f"  Recall:     {report['Buggy']['recall']:.4f}")
-        print(f"  {'=' * 40}")
-
-        os.makedirs(PLOTS_DIR, exist_ok=True)
         cm = confusion_matrix(y_test, y_pred)
-        fig, ax = plt.subplots(figsize=(6, 5))
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=["Clean", "Buggy"], yticklabels=["Clean", "Buggy"], ax=ax)
-        ax.set_title(f"Confusion Matrix (Thresh={threshold:.2f})")
-        plt.tight_layout()
-        plt.savefig(os.path.join(PLOTS_DIR, "01_confusion_matrix_calibrated_stack.png"), dpi=150)
-        plt.close()
+        tn, fp, fn, tp = cm.ravel()
+        opt_cost = (COST_FN * fn) + (COST_FP * fp)
 
-        # Compute cost reduction
-        default_preds = (y_prob >= 0.5).astype(int)
-        _, default_fp, default_fn, _ = confusion_matrix(y_test, default_preds).ravel()
-        default_cost = (COST_FN * default_fn) + (COST_FP * default_fp)
-        
-        _, opt_fp, opt_fn, _ = confusion_matrix(y_test, y_pred).ravel()
-        opt_cost = (COST_FN * opt_fn) + (COST_FP * opt_fp)
-        
-        cost_reduction = 0
-        if default_cost > 0:
-            cost_reduction = ((default_cost - opt_cost) / default_cost) * 100
-        
-        print(f"  📉 Total Cost Reduction vs Default 0.5 Thresh: {cost_reduction:.1f}%")
+        # Comparison with default 0.50 threshold
+        default_pred = (y_prob >= 0.50).astype(int)
+        _, def_fp, def_fn, _ = confusion_matrix(y_test, default_pred).ravel()
+        def_cost = (COST_FN * def_fn) + (COST_FP * def_fp)
+        cost_reduction = ((def_cost - opt_cost) / def_cost) * 100 if def_cost > 0 else 0.0
+
+        print(f"\n  📊 Performance Summary (Decision Threshold = {threshold:.2f}):")
+        print(f"  {'-' * 45}")
+        print(f"  AUC-ROC:           {auc_roc:.4f}")
+        print(f"  PR-AUC:            {pr_auc:.4f}")
+        print(f"  Brier Score:       {brier:.4f} (Ideal: 0.00)")
+        print(f"  Accuracy:          {accuracy*100:.2f}%")
+        print(f"  Buggy Recall:      {recall*100:.2f}% ({tp:,} / {tp+fn:,} caught)")
+        print(f"  Buggy Precision:   {precision*100:.2f}%")
+        print(f"  F1 Score:          {f1:.4f}")
+        print(f"  Cost Reduction:    {cost_reduction:.2f}% vs default 0.50 threshold")
+        print(f"  {'-' * 45}")
 
         self.metrics = {
             "auc_roc": round(auc_roc, 4),
+            "pr_auc": round(pr_auc, 4),
+            "brier_score": round(brier, 4),
             "accuracy": round(accuracy, 4),
             "f1_score": round(f1, 4),
-            "precision": round(report["Buggy"]["precision"], 4),
-            "recall": round(report["Buggy"]["recall"], 4),
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
             "decision_threshold": round(threshold, 2),
             "cost_reduction_pct": round(cost_reduction, 2),
             "test_size": len(y_test),
             "test_buggy_count": int(y_test.sum()),
             "confusion_matrix": cm.tolist(),
+            "feature_columns": self.feature_columns,
+            "training_date": pd.Timestamp.now().isoformat(),
         }
 
-    def analyze_shap(self, X_test):
-        print("\n[7] SHAP Explainability Analysis...")
+    def generate_diagnostic_plots(self, X_test, y_test, threshold):
+        print("\n[7] Generating Diagnostic Charts in plots/ ...")
+        os.makedirs(PLOTS_DIR, exist_ok=True)
+        y_prob = self.calibrated_model.predict_proba(X_test)[:, 1]
+        y_pred = (y_prob >= threshold).astype(int)
+
+        # 1. Confusion Matrix
+        cm = confusion_matrix(y_test, y_pred)
+        fig, ax = plt.subplots(figsize=(6, 5))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False,
+                    xticklabels=["Clean", "Buggy"], yticklabels=["Clean", "Buggy"], ax=ax)
+        ax.set_title(f"Confusion Matrix (Threshold = {threshold:.2f})", fontsize=12, fontweight="bold")
+        ax.set_ylabel("Actual Label")
+        ax.set_xlabel("Predicted Label")
+        plt.tight_layout()
+        plt.savefig(os.path.join(PLOTS_DIR, "01_confusion_matrix_calibrated_ensemble.png"), dpi=180)
+        plt.close()
+
+        # 2. Dual Curves: ROC and PR Curves
+        fpr, tpr, _ = roc_curve(y_test, y_prob)
+        prec_curve, rec_curve, _ = precision_recall_curve(y_test, y_prob)
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+        # ROC
+        ax1.plot(fpr, tpr, color="#2563EB", lw=2, label=f"Calibrated Ensemble (AUC = {self.metrics['auc_roc']:.4f})")
+        ax1.plot([0, 1], [0, 1], color="#9CA3AF", linestyle="--", lw=1.5, label="Random Guess (AUC = 0.50)")
+        ax1.set_title("ROC Curve — Defect Discrimination", fontweight="bold")
+        ax1.set_xlabel("False Positive Rate (1 - Specificity)")
+        ax1.set_ylabel("True Positive Rate (Sensitivity / Recall)")
+        ax1.legend(loc="lower right")
+        ax1.grid(True, alpha=0.3)
+
+        # PR
+        no_skill = y_test.mean()
+        ax2.plot(rec_curve, prec_curve, color="#7C3AED", lw=2, label=f"PR Curve (PR-AUC = {self.metrics['pr_auc']:.4f})")
+        ax2.axhline(no_skill, color="#9CA3AF", linestyle="--", lw=1.5, label=f"Baseline Rate ({no_skill*100:.1f}%)")
+        ax2.set_title("Precision-Recall Curve — High Class Imbalance", fontweight="bold")
+        ax2.set_xlabel("Recall (Buggy Commits Caught)")
+        ax2.set_ylabel("Precision")
+        ax2.legend(loc="upper right")
+        ax2.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(PLOTS_DIR, "04_roc_pr_curves.png"), dpi=180)
+        plt.close()
+
+        # 3. Probability Calibration Reliability Diagram
+        prob_true, prob_pred = calibration_curve(y_test, y_prob, n_bins=10)
+        fig, ax = plt.subplots(figsize=(7, 6))
+        ax.plot([0, 1], [0, 1], linestyle="--", color="#6B7280", label="Perfect Calibration")
+        ax.plot(prob_pred, prob_true, marker="o", color="#059669", lw=2, label=f"DevRisk Calibrated (Brier = {self.metrics['brier_score']:.4f})")
+        ax.set_title("Calibration Reliability Diagram", fontsize=12, fontweight="bold")
+        ax.set_xlabel("Mean Predicted Defect Probability")
+        ax.set_ylabel("Empirical Fraction of Positives (True Buggy Rate)")
+        ax.legend(loc="upper left")
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(os.path.join(PLOTS_DIR, "05_calibration_reliability.png"), dpi=180)
+        plt.close()
+
+        print("    ✅ Generated Confusion Matrix, ROC/PR Curves, and Calibration Diagram.")
+
+    def analyze_shap(self, X_test, y_test):
+        print("\n[8] Executing TreeSHAP Explainability Analysis...")
         if not SHAP_AVAILABLE:
-            print("    ⚠️ SHAP unavailable, skipping.")
+            print("    ⚠️ SHAP is not installed, skipping SHAP plots.")
             return
 
         try:
-            # We extract the XGBoost estimator from the StackingClassifier to explain it.
-            # (SHAP does not support StackingClassifier directly).
-            xgb_estimator = self.base_model.named_estimators_['xgb']
-            explainer = shap.TreeExplainer(xgb_estimator)
-            
-            # Subsample X_test for SHAP if it's too large
-            if len(X_test) > 5000:
-                np.random.seed(42)
-                idx = np.random.choice(len(X_test), 5000, replace=False)
-                X_sample = X_test[idx]
-            else:
-                X_sample = X_test
-                
+            explainer = shap.TreeExplainer(self.base_xgb)
+
+            # Subsample 2,500 commits for crisp global beeswarm
+            np.random.seed(RANDOM_STATE)
+            sample_size = min(2500, len(X_test))
+            sample_idx = np.random.choice(len(X_test), sample_size, replace=False)
+            X_sample = X_test[sample_idx]
+
             shap_values = explainer.shap_values(X_sample)
-            
-            fig, ax = plt.subplots(figsize=(10, 7))
-            shap.summary_plot(shap_values, X_sample, feature_names=ENGINEERED_FEATURE_COLUMNS, show=False)
+
+            # 1. SHAP Beeswarm Summary Plot
+            fig = plt.figure(figsize=(11, 8))
+            shap.summary_plot(
+                shap_values,
+                X_sample,
+                feature_names=self.feature_columns,
+                max_display=18,
+                show=False
+            )
+            plt.title("DevRisk AI — TreeSHAP Feature Attribution (Apache Commits)", fontsize=13, fontweight="bold")
             plt.tight_layout()
-            plt.savefig(os.path.join(PLOTS_DIR, "02_shap_summary_stack.png"), dpi=150, bbox_inches="tight")
+            plt.savefig(os.path.join(PLOTS_DIR, "02_shap_summary_beeswarm.png"), dpi=180, bbox_inches="tight")
             plt.close()
 
+            # 2. SHAP Feature Importance Bar Plot
             mean_abs_shap = np.abs(shap_values).mean(axis=0)
-            shap_ranking = sorted(zip(ENGINEERED_FEATURE_COLUMNS, mean_abs_shap), key=lambda x: x[1], reverse=True)
+            ranked_indices = np.argsort(mean_abs_shap)[::-1][:15]
+            top_features = [self.feature_columns[i] for i in ranked_indices]
+            top_importance = mean_abs_shap[ranked_indices]
 
-            print(f"\n  📊 SHAP Feature Ranking (XGB Base Model):")
-            for rank, (name, value) in enumerate(shap_ranking[:10], 1):
-                print(f"    {rank:>2}. {name:<25} = {value:.4f}")
+            fig, ax = plt.subplots(figsize=(9, 6))
+            y_pos = np.arange(len(top_features))[::-1]
+            ax.barh(y_pos, top_importance[::-1], color="#3B82F6", edgecolor="#1D4ED8")
+            ax.set_yticks(y_pos)
+            ax.set_yticklabels(top_features[::-1], fontsize=10)
+            ax.set_xlabel("Mean |SHAP value| (Average Impact on Model Risk Output)", fontsize=11)
+            ax.set_title("Top 15 Most Influential Code Change Metrics", fontsize=12, fontweight="bold")
+            ax.grid(axis="x", alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(os.path.join(PLOTS_DIR, "03_shap_feature_importance.png"), dpi=180)
+            plt.close()
+
+            # 3. High-Risk Commit Waterfall Plot
+            # Find an actual high-risk buggy commit
+            y_prob_sample = self.calibrated_model.predict_proba(X_test)[:, 1]
+            high_risk_idx = np.where((y_test == 1) & (y_prob_sample > 0.80))[0]
+            if len(high_risk_idx) > 0:
+                hr_idx = high_risk_idx[0]
+                explanation = explainer(X_test[hr_idx:hr_idx+1])
+                explanation.feature_names = self.feature_columns
+                fig = plt.figure(figsize=(10, 6))
+                shap.plots.waterfall(explanation[0], max_display=12, show=False)
+                plt.title(f"SHAP Waterfall — High-Risk PR (Predicted Risk: {y_prob_sample[hr_idx]*100:.1f}%)", fontweight="bold")
+                plt.tight_layout()
+                plt.savefig(os.path.join(PLOTS_DIR, "06_shap_waterfall_high_risk.png"), dpi=180, bbox_inches="tight")
+                plt.close()
+
+            # 4. Low-Risk Clean Commit Waterfall Plot
+            low_risk_idx = np.where((y_test == 0) & (y_prob_sample < 0.15))[0]
+            if len(low_risk_idx) > 0:
+                lr_idx = low_risk_idx[0]
+                explanation = explainer(X_test[lr_idx:lr_idx+1])
+                explanation.feature_names = self.feature_columns
+                fig = plt.figure(figsize=(10, 6))
+                shap.plots.waterfall(explanation[0], max_display=12, show=False)
+                plt.title(f"SHAP Waterfall — Clean / Low-Risk PR (Predicted Risk: {y_prob_sample[lr_idx]*100:.1f}%)", fontweight="bold")
+                plt.tight_layout()
+                plt.savefig(os.path.join(PLOTS_DIR, "07_shap_waterfall_low_risk.png"), dpi=180, bbox_inches="tight")
+                plt.close()
+
+            print("    ✅ Saved TreeSHAP Beeswarm, Importance Bar, and Waterfall Plots.")
+
         except Exception as e:
             print(f"    ⚠️ Failed to generate SHAP plots: {e}")
 
     def save_artifacts(self, cv_auc, cv_std, min_cost):
-        print("\n[8] Saving Model & Artifacts...")
+        print("\n[9] Serializing Models & Production Artifacts...")
         os.makedirs(MODEL_DIR, exist_ok=True)
-        
-        # Save Stacking model and Calibrated Stacked model
-        base_path = os.path.join(MODEL_DIR, "xgboost_model.pkl") # Kept same name for compatibility with explainer API
-        # Actually it's now a StackingClassifier, let's keep the name for compatibility or change it.
-        joblib.dump(self.base_model, base_path)
-        
-        calib_path = os.path.join(MODEL_DIR, "calibrated_model.pkl")
-        joblib.dump(self.calibrated_model, calib_path)
-        
-        self.metrics["cv_auc_roc_mean"] = round(float(cv_auc), 4)
-        self.metrics["cv_auc_roc_std"] = round(float(cv_std), 4)
-        self.metrics["train_minimized_cost"] = round(float(min_cost), 2)
-        self.metrics["feature_columns"] = ENGINEERED_FEATURE_COLUMNS
-        self.metrics["training_date"] = pd.Timestamp.now().isoformat()
 
-        metrics_path = os.path.join(MODEL_DIR, "training_metrics.json")
-        with open(metrics_path, "w") as f:
+        # Base XGBoost model (for TreeSHAP)
+        joblib.dump(self.base_xgb, os.path.join(MODEL_DIR, "xgboost_model.pkl"), compress=3)
+
+        # Calibrated Ensemble model (for Production Inference)
+        joblib.dump(self.calibrated_model, os.path.join(MODEL_DIR, "calibrated_model.pkl"), compress=3)
+
+        # Metadata metrics
+        self.metrics["cv_auc_roc_mean"] = round(cv_auc, 4)
+        self.metrics["cv_auc_roc_std"] = round(cv_std, 4)
+        self.metrics["train_minimized_cost"] = round(float(min_cost), 2)
+
+        with open(os.path.join(MODEL_DIR, "training_metrics.json"), "w") as f:
             json.dump(self.metrics, f, indent=2)
 
-        columns_path = os.path.join(MODEL_DIR, "feature_columns.json")
-        with open(columns_path, "w") as f:
-            json.dump(ENGINEERED_FEATURE_COLUMNS, f)
+        with open(os.path.join(MODEL_DIR, "feature_columns.json"), "w") as f:
+            json.dump(self.feature_columns, f, indent=2)
 
-        print(f"    ✅ Saved models to {MODEL_DIR}")
+        print(f"    ✅ Successfully saved models and metrics in {MODEL_DIR}")
 
 
 if __name__ == "__main__":

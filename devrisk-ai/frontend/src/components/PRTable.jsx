@@ -39,6 +39,7 @@ export default function PRTable({ pullRequests = [], showRepo = false }) {
           <th>Risk Score</th>
           <th>Status</th>
           <th>Date</th>
+          <th style={{ textAlign: 'right' }}>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -46,6 +47,7 @@ export default function PRTable({ pullRequests = [], showRepo = false }) {
           <tr
             key={pr.id}
             onClick={() => navigate(`/prs/${pr.id}`)}
+            style={{ cursor: 'pointer' }}
           >
             <td>
               <div style={{ fontWeight: 600 }}>#{pr.pr_number}</div>
@@ -82,6 +84,40 @@ export default function PRTable({ pullRequests = [], showRepo = false }) {
                     year: 'numeric',
                   })
                 : '—'}
+            </td>
+            <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => navigate(`/simulator?prId=${pr.id}`)}
+                  title={`Simulate counterfactual changes on PR #${pr.pr_number || pr.id} in Playground`}
+                  style={{
+                    fontSize: 11,
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <span>⚡</span>
+                  <span>Simulate</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => navigate(`/prs/${pr.id}`)}
+                  title={`View detailed SHAP analysis for PR #${pr.pr_number || pr.id}`}
+                  style={{
+                    fontSize: 11,
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                  }}
+                >
+                  View ↗
+                </button>
+              </div>
             </td>
           </tr>
         ))}

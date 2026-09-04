@@ -76,6 +76,21 @@ export default function Login() {
           <button type="submit" className="btn btn-primary auth-btn" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
+
+          <button
+            type="button"
+            className="btn btn-secondary auth-btn"
+            style={{ marginTop: 10, width: '100%', justifyContent: 'center' }}
+            onClick={() => {
+              setForm({ email: 'rupeshhonrao88@gmail.com', password: 'password123' });
+              loginUser({ email: 'rupeshhonrao88@gmail.com', password: 'password123' }).then((res) => {
+                login(res.data.token, res.data.user);
+                navigate('/');
+              }).catch(() => {});
+            }}
+          >
+            ⚡ Quick Demo Login (Honrao)
+          </button>
         </form>
 
         <div className="auth-footer">

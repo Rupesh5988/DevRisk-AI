@@ -56,7 +56,15 @@ export const getPRsByRepo = (repoId, page = 1, limit = 20, riskLabel = null) => 
   return api.get(`/repos/${repoId}/prs`, { params });
 };
 
+export const listAllPRs = (page = 1, limit = 20, riskLabel = null, search = null) => {
+  const params = { page, limit };
+  if (riskLabel) params.risk_label = riskLabel;
+  if (search) params.search = search;
+  return api.get('/prs', { params });
+};
+
 export const getPRDetail = (id) => api.get(`/prs/${id}`);
+export const simulatePR = (data) => api.post('/prs/simulate', data);
 
 // ---- Analytics ----
 export const getOverview = () => api.get('/analytics/overview');

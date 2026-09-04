@@ -2,8 +2,9 @@
 ============================================================
 SHAP Explainer Module
 ============================================================
-Computes SHAP values for individual predictions and converts
-them into human-readable explanations.
+Computes TreeSHAP attribution values for pull request predictions
+and translates mathematical feature contributions into intuitive,
+plain-English explanations for developers and code reviewers.
 ============================================================
 """
 
@@ -15,145 +16,173 @@ from .predictor import predictor
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 XGBOOST_MODEL_PATH = os.path.join(BASE_DIR, "model", "xgboost_model.pkl")
 
-# SHAP is optional — may fail on systems where numba DLLs are blocked
 try:
     import shap
     SHAP_AVAILABLE = True
 except (ImportError, OSError):
     SHAP_AVAILABLE = False
-    print("[Explainer] ⚠️  SHAP not available — using XGBoost feature importance fallback")
+    print("[Explainer] ⚠️  SHAP not available — using feature importance fallback")
 
-# Feature columns will be loaded dynamically from the predictor's model artifacts
-
-# Plain-English templates for each feature
-# {value} is replaced with the actual feature value
+# Plain-English templates for all 28 features (both raw & engineered domain metrics)
 SHAP_TEMPLATES = {
     "ns": {
-        "positive": "Changes span {value} subsystems — wide spread increases risk",
-        "negative": "Changes are contained within {value} subsystem(s) — focused change",
+        "positive": "Changes span {value} subsystems — wide architectural spread increases defect probability",
+        "negative": "Changes are contained within {value} subsystem(s) — focused, localized scope",
     },
     "nd": {
-        "positive": "Modifications touch {value} directories — scattered changes are riskier",
-        "negative": "Only {value} directory(ies) modified — well-contained change",
+        "positive": "Modifications touch {value} distinct directories — scattered directory footprint",
+        "negative": "Modifications are restricted to {value} directory(ies) — well-contained footprint",
     },
     "nf": {
-        "positive": "{value} files modified — more files means more risk surface",
-        "negative": "Only {value} file(s) changed — minimal scope",
+        "positive": "{value} files modified — broad attack surface and higher regression likelihood",
+        "negative": "Only {value} file(s) changed — minimal file surface area",
     },
     "entropy": {
-        "positive": "Changes are unevenly distributed (entropy: {value:.2f}) — concentrated edits",
-        "negative": "Changes are evenly spread (entropy: {value:.2f}) — balanced modification",
+        "positive": "Unevenly distributed changes (entropy: {value:.2f}) — concentrated code modifications",
+        "negative": "Evenly distributed changes (entropy: {value:.2f}) — balanced, orderly modifications",
     },
     "la": {
-        "positive": "{value} lines added — large additions often introduce bugs",
-        "negative": "Only {value} lines added — small, manageable addition",
+        "positive": "{value} lines added — substantial new logic introduced",
+        "negative": "Only {value} lines added — lightweight addition",
     },
     "ld": {
-        "positive": "{value} lines deleted — large deletions can break existing dependencies",
-        "negative": "Only {value} lines removed — minimal disruption",
+        "positive": "{value} lines deleted — large removals may break implicit dependencies",
+        "negative": "Only {value} lines deleted — minimal disruption to existing codebase",
     },
     "lt": {
-        "positive": "Modified files contain {value} total lines — changing large files has more side effects",
-        "negative": "Modified files are relatively small ({value} lines) — lower risk surface",
+        "positive": "Modified files encompass {value} total lines — altering large files has wider blast radius",
+        "negative": "Modified files are relatively compact ({value} total lines) — lower blast radius",
     },
     "fix": {
-        "positive": "This is a bug-fix commit — bug fixes sometimes introduce new regressions",
-        "negative": "This is a feature/non-fix commit — typically lower regression risk",
+        "positive": "This commit addresses an existing defect — historical data shows bug fixes have higher recurrence risk",
+        "negative": "Standard feature / non-fix commit — typical baseline defect incidence",
     },
     "ndev": {
-        "positive": "{value} different developers have previously touched these files — inconsistent styles",
-        "negative": "Only {value} developer(s) have worked on these files — consistent codebase",
+        "positive": "{value} distinct past contributors on these files — fragmented code ownership",
+        "negative": "Only {value} past contributor(s) — consistent code conventions and ownership",
     },
     "age": {
-        "positive": "Files haven't been modified in ~{value:.0f} days — stale files are fragile",
-        "negative": "Files were recently updated (~{value:.0f} days ago) — actively maintained",
+        "positive": "Files were last modified ~{value:.0f} days ago — dormant/stale files carry hidden coupling",
+        "negative": "Files were actively maintained (~{value:.0f} days ago) — fresh in team memory",
     },
     "nuc": {
-        "positive": "Files have {value} prior unique changes — frequently changed files are unstable",
-        "negative": "Files have only {value} prior change(s) — stable codebase",
+        "positive": "Files have undergone {value} prior revisions — defect-prone hotspot files",
+        "negative": "Files have only {value} prior revision(s) — historically stable code",
     },
     "exp": {
-        "positive": "Developer has only {value} prior commits — limited experience with this repo",
-        "negative": "Developer has {value} prior commits — experienced contributor",
+        "positive": "Contributor has only {value} lifetime commits in this repo — unfamiliar with overall patterns",
+        "negative": "Contributor has {value} prior commits — highly experienced repository contributor",
     },
     "rexp": {
-        "positive": "Developer has only {value} commits in the last 90 days — not recently active",
-        "negative": "Developer has {value} recent commits — actively working on this repo",
+        "positive": "Contributor has only {value} recent commits in last 90 days — may be out of sync with current practices",
+        "negative": "Contributor has {value} recent commits — actively immersed in the codebase",
     },
     "sexp": {
-        "positive": "Developer has only {value} commits to these subsystems — unfamiliar territory",
-        "negative": "Developer has {value} commits to these subsystems — knows this area well",
+        "positive": "Contributor has only {value} prior commits in these specific subsystems — unfamiliar domain",
+        "negative": "Contributor has {value} commits in these subsystems — recognized domain specialist",
     },
     "churn_density": {
-        "positive": "High churn density ({value:.2f}) — many lines modified relative to file size",
-        "negative": "Low churn density ({value:.2f}) — minimal disruption to file structure",
+        "positive": "High churn density ({value:.2f}) — a large fraction of the file's contents was rewritten",
+        "negative": "Low churn density ({value:.2f}) — surgical modification without rewriting file structure",
     },
     "la_ratio": {
-        "positive": "High addition ratio ({value:.2f}) — mostly adding new code",
-        "negative": "Low addition ratio ({value:.2f}) — mostly deleting code",
+        "positive": "Heavily skewed towards addition ({value:.2f}) — significant influx of unverified code",
+        "negative": "Balanced addition/deletion ratio ({value:.2f}) — standard refactoring pattern",
     },
     "exp_per_file": {
-        "positive": "Low experience per file ({value:.2f}) — developer is stretched thin",
-        "negative": "High experience per file ({value:.2f}) — developer knows these files well",
+        "positive": "Low author experience per touched file ({value:.2f}) — contributor is spread thin across files",
+        "negative": "High author experience per touched file ({value:.2f}) — thoroughly familiar with each file",
     },
     "recent_exp_ratio": {
-        "positive": "Low recent experience ratio ({value:.2f}) — developer hasn't worked here recently",
-        "negative": "High recent experience ratio ({value:.2f}) — developer is actively engaged",
-    },
-    "dev_density_risk": {
-        "positive": "High developer density over time ({value:.2f}) — too many cooks in a short timeframe",
-        "negative": "Low developer density ({value:.2f}) — stable, consistent ownership",
+        "positive": "Low recent activity ratio ({value:.2f}) — contributor history is predominantly distant",
+        "negative": "High recent activity ratio ({value:.2f}) — contributor's recent track record is strong",
     },
     "exp_vs_complexity": {
-        "positive": "Experience outweighs complexity ({value:.2f}) — developer can handle this",
-        "negative": "Complexity outweighs experience ({value:.2f}) — high risk of introducing bugs",
+        "positive": "Change complexity exceeds contributor's experience factor ({value:.2f})",
+        "negative": "Contributor's experience comfortably handles the change complexity ({value:.2f})",
     },
     "subsystem_familiarity": {
-        "positive": "High subsystem familiarity ({value:.2f}) — expert in this domain",
-        "negative": "Low subsystem familiarity ({value:.2f}) — modifying unfamiliar components",
+        "positive": "Low subsystem specialization ({value:.2f}) — author rarely touches these components",
+        "negative": "High subsystem specialization ({value:.2f}) — author knows these components deeply",
     },
     "churn_intensity": {
-        "positive": "High churn intensity ({value:.2f}) — large, complex edits",
-        "negative": "Low churn intensity ({value:.2f}) — straightforward, simple edits",
-    }
+        "positive": "High churn intensity ({value:.2f}) — large volume of changes concentrated in high-entropy zones",
+        "negative": "Low churn intensity ({value:.2f}) — modest changes in simple, low-entropy zones",
+    },
+    "dev_density_risk": {
+        "positive": "High author turnover rate relative to file age ({value:.2f}) — multiple authors without single owner",
+        "negative": "Stable ownership density ({value:.2f}) — low author churn over file lifetime",
+    },
+    "diffusion_factor": {
+        "positive": "High architectural diffusion ({value:.2f}) — changes span multiple subsystems across few files",
+        "negative": "Low architectural diffusion ({value:.2f}) — changes remain tightly bounded within directory structure",
+    },
+    "churn_asymmetry": {
+        "positive": "High churn asymmetry ({value:.2f}) — massive one-sided edit indicates rewrite volatility",
+        "negative": "Balanced churn symmetry ({value:.2f}) — symmetric additions and removals suggest routine refactor",
+    },
+    "churn_per_file": {
+        "positive": "High churn per file ({value:.2f}) — dense modifications concentrated per file",
+        "negative": "Low churn per file ({value:.2f}) — lightweight edits per file",
+    },
+    "fragility_index": {
+        "positive": "Elevated codebase fragility ({value:.2f}) — frequent historical revisions touched by newer author",
+        "negative": "Low fragility ({value:.2f}) — stable codebase touched by experienced developer",
+    },
+    "subsystem_entropy": {
+        "positive": "Subsystem modification is unevenly concentrated ({value:.2f})",
+        "negative": "Subsystem modification is evenly distributed ({value:.2f})",
+    },
+    "rexp_vs_sexp": {
+        "positive": "Contributor is active in other repo areas but has little experience in these specific subsystems ({value:.2f})",
+        "negative": "Contributor's recent activity aligns closely with their subsystem experience ({value:.2f})",
+    },
 }
 
 
 class Explainer:
     """
-    Computes SHAP values and generates human-readable explanations
-    for individual predictions.
+    Computes TreeSHAP feature attributions for individual PR predictions
+    and produces plain-English explanations highlighting key risk drivers.
     """
 
     def __init__(self):
         self.explainer = None
-        self.base_model = None
+        self.tree_model = None
         self.use_fallback = False
         self._initialize()
 
     def _initialize(self):
-        """Create the SHAP TreeExplainer from the uncalibrated base model."""
+        """Initialize SHAP TreeExplainer from the serialized base XGBoost model."""
         if not os.path.exists(XGBOOST_MODEL_PATH):
-            print(f"[Explainer] ⚠️  Base model not found at {XGBOOST_MODEL_PATH} — explainer unavailable")
+            print(f"[Explainer] ⚠️  Model file not found: {XGBOOST_MODEL_PATH}")
             return
-            
+
         try:
-            self.base_model = joblib.load(XGBOOST_MODEL_PATH)
-            print(f"[Explainer] ✅ Loaded base model for SHAP from {XGBOOST_MODEL_PATH}")
+            raw_model = joblib.load(XGBOOST_MODEL_PATH)
+            # If wrapped in StackingClassifier or VotingClassifier, extract base estimator
+            if hasattr(raw_model, "named_estimators_") and "xgb" in raw_model.named_estimators_:
+                self.tree_model = raw_model.named_estimators_["xgb"]
+            elif hasattr(raw_model, "estimators_") and len(raw_model.estimators_) > 0:
+                self.tree_model = raw_model.estimators_[0]
+            else:
+                self.tree_model = raw_model
+
+            print(f"[Explainer] ✅ Loaded base XGBoost tree model from {XGBOOST_MODEL_PATH}")
         except Exception as e:
-            print(f"[Explainer] ❌ Failed to load base model: {e}")
+            print(f"[Explainer] ❌ Failed to load tree model: {e}")
             return
 
         if not SHAP_AVAILABLE:
-            print("[Explainer] ⚠️  SHAP unavailable — using feature importance fallback")
+            print("[Explainer] ⚠️  SHAP library unavailable — using feature importance fallback")
             self.use_fallback = True
             return
 
         try:
-            self.explainer = shap.TreeExplainer(self.base_model)
-            print("[Explainer] ✅ SHAP TreeExplainer initialized on base model")
+            self.explainer = shap.TreeExplainer(self.tree_model)
+            print("[Explainer] ✅ TreeSHAP Explainer initialized successfully")
         except Exception as e:
-            print(f"[Explainer] ❌ SHAP init failed ({e}) — using fallback")
+            print(f"[Explainer] ❌ TreeExplainer initialization failed ({e}) — fallback enabled")
             self.use_fallback = True
 
     @property
@@ -162,112 +191,115 @@ class Explainer:
 
     def explain(self, features: list[float]) -> dict:
         """
-        Compute SHAP values and generate explanations for a prediction.
-
-        Args:
-            features: List of 14 float values.
+        Compute per-feature SHAP attributions for a 14-element PR vector.
 
         Returns:
-            dict with:
-                - shap_values: List of 14 SHAP values
-                - base_value: Base prediction value
-                - explanations: List of explanation dicts sorted by impact
+            dict containing:
+                - shap_values (list[float]): Raw attribution per feature
+                - base_value (float): Expected model base output
+                - explanations (list[dict]): Ranked explanations (highest impact first)
+                - risk_escalators (list[dict]): Top features driving risk UP
+                - safety_factors (list[dict]): Top features driving risk DOWN
         """
         if not self.is_ready:
-            raise RuntimeError("Explainer is not initialized")
+            raise RuntimeError("SHAP Explainer is not initialized. Ensure models are trained.")
 
-        # If SHAP is not available, use XGBoost feature importances as fallback
         if self.use_fallback:
             return self._explain_fallback(features)
 
         return self._explain_shap(features)
 
-    def _explain_fallback(self, features: list[float]) -> dict:
-        """Fallback explanation using XGBoost built-in feature importances."""
-        importances = self.base_model.feature_importances_
+    def _explain_shap(self, features: list[float]) -> dict:
+        """High-speed TreeSHAP computation."""
+        feature_array = predictor.transform_features(features)
+        transformed = feature_array[0]
 
-        transformed_features = predictor.transform_features(features)[0]
+        shap_vals = self.explainer.shap_values(feature_array)
+
+        # Extract 1D array of SHAP attributions
+        if isinstance(shap_vals, list):
+            sv = shap_vals[1][0] if len(shap_vals) > 1 else shap_vals[0][0]
+        elif shap_vals.ndim == 2:
+            sv = shap_vals[0]
+        else:
+            sv = shap_vals
+
+        base_val = float(self.explainer.expected_value)
+        if isinstance(self.explainer.expected_value, (list, np.ndarray)):
+            base_val = float(self.explainer.expected_value[1]) if len(self.explainer.expected_value) > 1 else float(self.explainer.expected_value[0])
 
         explanations = []
-        for i, feature_name in enumerate(predictor.feature_columns):
-            imp = float(importances[i])
-            feat_val = transformed_features[i]
-            # Use importance as a pseudo-SHAP value (positive = more important)
-            direction = "positive" if imp > np.median(importances) else "negative"
+        feature_names = predictor.feature_columns
 
-            template = SHAP_TEMPLATES.get(feature_name, {}).get(direction, f"{feature_name}: {feat_val}")
+        for i, name in enumerate(feature_names):
+            shap_val = float(sv[i])
+            feat_val = float(transformed[i])
+            direction = "positive" if shap_val >= 0 else "negative"
+
+            template = SHAP_TEMPLATES.get(name, {}).get(direction, f"{name}: {feat_val:.2f}")
+            disp_val = int(feat_val) if feat_val.is_integer() else round(feat_val, 2)
+
             try:
-                explanation_text = template.format(value=feat_val)
+                explanation_text = template.format(value=disp_val)
             except (KeyError, ValueError):
-                explanation_text = template.replace("{value}", str(round(feat_val, 2)))
+                explanation_text = template.replace("{value}", str(disp_val))
 
             explanations.append({
-                "feature_name": feature_name,
+                "feature_name": name,
+                "shap_value": round(shap_val, 6),
+                "feature_value": round(feat_val, 4),
+                "direction": direction,
+                "explanation": explanation_text,
+            })
+
+        # Rank all features by absolute SHAP impact
+        explanations.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
+
+        # Categorize into top risk escalators and safety factors
+        risk_escalators = [e for e in explanations if e["direction"] == "positive"][:5]
+        safety_factors = [e for e in explanations if e["direction"] == "negative"][:5]
+
+        return {
+            "shap_values": [round(float(v), 6) for v in sv],
+            "base_value": round(base_val, 6),
+            "explanations": explanations,
+            "risk_escalators": risk_escalators,
+            "safety_factors": safety_factors,
+        }
+
+    def _explain_fallback(self, features: list[float]) -> dict:
+        """Gini / Gain feature importance fallback when SHAP C-extensions are blocked."""
+        importances = getattr(self.tree_model, "feature_importances_", np.ones(len(predictor.feature_columns)))
+        transformed = predictor.transform_features(features)[0]
+
+        explanations = []
+        for i, name in enumerate(predictor.feature_columns):
+            imp = float(importances[i])
+            feat_val = float(transformed[i])
+            direction = "positive" if feat_val > 0 else "negative"
+            template = SHAP_TEMPLATES.get(name, {}).get(direction, f"{name}: {feat_val:.2f}")
+            disp_val = int(feat_val) if feat_val.is_integer() else round(feat_val, 2)
+
+            try:
+                explanation_text = template.format(value=disp_val)
+            except (KeyError, ValueError):
+                explanation_text = template.replace("{value}", str(disp_val))
+
+            explanations.append({
+                "feature_name": name,
                 "shap_value": round(imp, 6),
                 "feature_value": round(feat_val, 4),
+                "direction": direction,
                 "explanation": explanation_text,
             })
 
         explanations.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
-
         return {
             "shap_values": [round(float(v), 6) for v in importances],
             "base_value": 0.5,
             "explanations": explanations,
-        }
-
-    def _explain_shap(self, features: list[float]) -> dict:
-        """Full SHAP explanation using TreeExplainer."""
-
-        feature_array = predictor.transform_features(features)
-        transformed_features = feature_array[0]
-
-        # Compute SHAP values
-        shap_values = self.explainer.shap_values(feature_array)
-
-        # shap_values shape depends on the model type
-        # For binary classification, it may be a single array or [class_0, class_1]
-        if isinstance(shap_values, list):
-            # Multi-output: use class 1 (buggy)
-            sv = shap_values[1][0] if len(shap_values) > 1 else shap_values[0][0]
-        elif shap_values.ndim == 2:
-            sv = shap_values[0]
-        else:
-            sv = shap_values
-
-        # Get base value
-        base_value = float(self.explainer.expected_value)
-        if isinstance(self.explainer.expected_value, (list, np.ndarray)):
-            base_value = float(self.explainer.expected_value[1]) if len(self.explainer.expected_value) > 1 else float(self.explainer.expected_value[0])
-
-        # Build explanations
-        explanations = []
-        for i, feature_name in enumerate(predictor.feature_columns):
-            shap_val = float(sv[i])
-            feat_val = transformed_features[i]
-            direction = "positive" if shap_val >= 0 else "negative"
-
-            # Generate English explanation
-            template = SHAP_TEMPLATES.get(feature_name, {}).get(direction, f"{feature_name}: {feat_val}")
-            try:
-                explanation_text = template.format(value=feat_val)
-            except (KeyError, ValueError):
-                explanation_text = template.replace("{value}", str(int(feat_val) if feat_val == int(feat_val) else round(feat_val, 2)))
-
-            explanations.append({
-                "feature_name": feature_name,
-                "shap_value": round(shap_val, 6),
-                "feature_value": round(feat_val, 4),
-                "explanation": explanation_text,
-            })
-
-        # Sort by absolute SHAP value (biggest impact first)
-        explanations.sort(key=lambda x: abs(x["shap_value"]), reverse=True)
-
-        return {
-            "shap_values": [round(float(v), 6) for v in sv],
-            "base_value": round(base_value, 6),
-            "explanations": explanations,
+            "risk_escalators": explanations[:5],
+            "safety_factors": [],
         }
 
 

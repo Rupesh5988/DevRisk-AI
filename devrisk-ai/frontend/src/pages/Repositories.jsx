@@ -78,32 +78,79 @@ export default function Repositories() {
       {/* Add Repository Form */}
       <div className="card animate-in" style={{ marginBottom: 32 }}>
         <div className="card-header">
-          <h3 className="card-title">Add Repository</h3>
+          <div>
+            <h3 className="card-title">Add Repository</h3>
+            <span className="card-subtitle">Connect a public or private GitHub repository for automated risk scoring</span>
+          </div>
         </div>
         <form onSubmit={handleAddRepo} style={{ display: 'flex', gap: 12 }}>
           <input
             type="text"
             className="input-field"
-            placeholder="https://github.com/owner/repo"
+            placeholder="https://github.com/owner/repo or owner/repo"
             value={newUrl}
             onChange={(e) => setNewUrl(e.target.value)}
             disabled={addLoading}
+            style={{ flex: 1 }}
           />
           <button
             type="submit"
             className="btn btn-primary"
             disabled={addLoading || !newUrl.trim()}
-            style={{ whiteSpace: 'nowrap' }}
+            style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            {addLoading ? 'Adding...' : '+ Add Repo'}
+            {addLoading ? (
+              <>
+                <span className="spinner" style={{ width: 14, height: 14 }}></span>
+                <span>Adding...</span>
+              </>
+            ) : (
+              <span>+ Add Repo</span>
+            )}
           </button>
         </form>
+
+        {/* Quick Sample Suggestions */}
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Quick Suggestions:</span>
+          {[
+            'https://github.com/Rupesh5988/DevRisk-AI',
+            'https://github.com/expressjs/express',
+            'https://github.com/public-apis/public-apis',
+            'https://github.com/facebook/react',
+          ].map((sample) => (
+            <button
+              key={sample}
+              type="button"
+              onClick={() => setNewUrl(sample)}
+              style={{
+                background: 'var(--bg-glass)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '3px 8px',
+                fontSize: 11,
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontFamily: 'monospace',
+              }}
+            >
+              {sample.replace('https://github.com/', '')}
+            </button>
+          ))}
+        </div>
+
         {addMessage && (
-          <div style={{
-            marginTop: 12,
-            fontSize: 13,
-            color: addMessage.type === 'success' ? 'var(--success)' : 'var(--error)',
-          }}>
+          <div
+            style={{
+              marginTop: 14,
+              padding: '10px 14px',
+              borderRadius: 'var(--radius-md)',
+              fontSize: 13,
+              background: addMessage.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+              border: `1px solid ${addMessage.type === 'success' ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+              color: addMessage.type === 'success' ? 'var(--risk-low)' : 'var(--risk-high)',
+            }}
+          >
             {addMessage.text}
           </div>
         )}

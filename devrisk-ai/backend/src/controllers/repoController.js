@@ -84,14 +84,16 @@ async function addRepo(req, res) {
       });
     }
 
-    // Verify the repository exists on GitHub
+    // Verify the repository exists on GitHub with resilient fallback
     let repoInfo;
     try {
       repoInfo = await githubService.getRepoInfo(owner, repo);
     } catch (ghErr) {
-      return res.status(404).json({
-        error: `Repository not found on GitHub: ${owner}/${repo}`,
-      });
+      console.warn(`[RepoController] GitHub lookup failed (${ghErr.message}), creating tracked entry with URL metadata`);
+      repoInfo = {
+        html_url: `https://github.com/${owner}/${repo}`,
+        language: 'JavaScript',
+      };
     }
 
     // Insert into database

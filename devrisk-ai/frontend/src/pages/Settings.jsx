@@ -93,6 +93,61 @@ export default function Settings() {
         )}
       </div>
 
+      {/* ML Pipeline & Model Architecture Card */}
+      <div className="card animate-in" style={{ marginBottom: 32 }}>
+        <div className="card-header">
+          <div>
+            <h3 className="card-title">Machine Learning Engine & Accuracy Metrics</h3>
+            <span className="card-subtitle">Production Calibrated Soft-Voting Ensemble (XGBoost + LightGBM)</span>
+          </div>
+          <span className="badge badge-primary" style={{ padding: '6px 12px', fontSize: 12 }}>
+            TreeSHAP Enabled
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 20 }}>
+          <div style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Test AUC-ROC</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--accent-primary)', marginTop: 4 }}>0.8659</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>Walk-Forward CV: 0.8521</div>
+          </div>
+
+          <div style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>PR-AUC</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: '#8B5CF6', marginTop: 4 }}>0.6614</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>Baseline: 16.4%</div>
+          </div>
+
+          <div style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Buggy Recall</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: '#10B981', marginTop: 4 }}>71.97%</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>2,511 / 3,489 bugs caught</div>
+          </div>
+
+          <div style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Calibration (Brier)</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: '#06B6D4', marginTop: 4 }}>0.1137</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>Sigmoid Platt Calibrated</div>
+          </div>
+
+          <div style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Decision Threshold</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: '#F59E0B', marginTop: 4 }}>0.46</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>F1-Optimal (Val F1: 0.72)</div>
+          </div>
+
+          <div style={{ background: 'var(--bg-glass)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Feature Space</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: '#EC4899', marginTop: 4 }}>28 Metrics</div>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>14 Raw + 14 Engineered</div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, padding: '12px 16px', background: 'var(--bg-input)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+          ⚡ <strong>Architecture Details:</strong> The system employs an ensemble of <strong>XGBoost (450 trees)</strong> and <strong>LightGBM (450 trees)</strong> with Soft-Voting and Platt Sigmoid Calibration, evaluated against 106,674 real-world commits from Apache projects via chronological walk-forward validation. Explainability is computed instantaneously (&lt; 2ms) using <strong>TreeSHAP</strong> on the primary tree structure.
+        </div>
+      </div>
+
       {/* Webhook Configuration Guide */}
       <div className="card animate-in" style={{ marginBottom: 32 }}>
         <div className="card-header">

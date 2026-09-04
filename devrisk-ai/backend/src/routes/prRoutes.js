@@ -4,7 +4,13 @@
 
 const express = require('express');
 const router = express.Router();
-const { getPRById, getPRsByRepo } = require('../controllers/prController');
+const { getPRById, getPRsByRepo, simulatePRAnalysis, listAllPRs } = require('../controllers/prController');
+
+// GET /api/prs — global paginated list of all analyzed pull requests
+router.get('/', listAllPRs);
+
+// POST /api/prs/simulate — interactive developer sandbox PR analysis
+router.post('/simulate', simulatePRAnalysis);
 
 // GET /api/prs/:id — full analysis report for a single PR
 router.get('/:id', getPRById);

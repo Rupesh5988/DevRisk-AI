@@ -20,23 +20,28 @@ import 'reactflow/dist/style.css';
  * Applies automatic layout positioning.
  */
 function buildFlowElements(graphData, modifiedFiles = []) {
-  const { nodes: nodeNames = [], edges: graphEdges = [] } = graphData;
+  const { nodes: nodeNames = [], edges: graphEdges = [] } = graphData || {};
 
-  if (nodeNames.length === 0) return { initialNodes: [], initialEdges: [] };
+  if (!nodeNames || nodeNames.length === 0) return { initialNodes: [], initialEdges: [] };
 
-  const modifiedSet = new Set(modifiedFiles.map((f) => f.toLowerCase()));
+  const modifiedSet = new Set(
+    (modifiedFiles || []).map((f) =>
+      typeof f === 'string' ? f.toLowerCase() : String(f?.id || f?.name || f || '').toLowerCase()
+    )
+  );
 
   // Find files that are targets of modified files (affected by the change)
   const affectedSet = new Set();
-  for (const edge of graphEdges) {
-    if (modifiedSet.has(edge.source.toLowerCase())) {
-      affectedSet.add(edge.target.toLowerCase());
+  for (const edge of graphEdges || []) {
+    if (edge?.source && modifiedSet.has(String(edge.source).toLowerCase())) {
+      if (edge.target) affectedSet.add(String(edge.target).toLowerCase());
     }
   }
 
   // Position nodes in a grid layout
   const cols = Math.ceil(Math.sqrt(nodeNames.length));
-  const initialNodes = nodeNames.map((name, idx) => {
+  const initialNodes = nodeNames.map((nodeItem, idx) => {
+    const name = typeof nodeItem === 'string' ? nodeItem : String(nodeItem?.id || nodeItem?.name || idx);
     const col = idx % cols;
     const row = Math.floor(idx / cols);
     const isModified = modifiedSet.has(name.toLowerCase());
@@ -88,18 +93,18 @@ function buildFlowElements(graphData, modifiedFiles = []) {
     };
   });
 
-  const initialEdges = graphEdges.map((edge, idx) => ({
+  const initialEdges = (graphEdges || []).map((edge, idx) => ({
     id: `edge-${idx}`,
-    source: edge.source,
-    target: edge.target,
-    animated: modifiedSet.has(edge.source.toLowerCase()),
+    source: String(edge.source),
+    target: String(edge.target),
+    animated: edge.source ? modifiedSet.has(String(edge.source).toLowerCase()) : false,
     style: {
-      stroke: modifiedSet.has(edge.source.toLowerCase()) ? '#ef4444' : '#64748b',
+      stroke: edge.source && modifiedSet.has(String(edge.source).toLowerCase()) ? '#ef4444' : '#64748b',
       strokeWidth: 1.5,
     },
     markerEnd: {
       type: MarkerType.ArrowClosed,
-      color: modifiedSet.has(edge.source.toLowerCase()) ? '#ef4444' : '#64748b',
+      color: edge.source && modifiedSet.has(String(edge.source).toLowerCase()) ? '#ef4444' : '#64748b',
     },
   }));
 
@@ -112,8 +117,13 @@ export default function GraphView({ graphData = {}, modifiedFiles = [] }) {
     [graphData, modifiedFiles]
   );
 
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  React.useEffect(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
 
   if (initialNodes.length === 0) {
     return (

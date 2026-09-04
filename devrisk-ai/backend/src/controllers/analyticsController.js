@@ -70,19 +70,21 @@ async function getOverview(req, res) {
       LIMIT 10
     `);
 
+    // Repositories count
+    const repoCountResult = await pool.query('SELECT COUNT(*) AS total FROM repositories');
+    const totalRepos = parseInt(repoCountResult.rows[0].total, 10) || 0;
+
     res.json({
       summary: {
         total_prs: totalPRs,
         avg_risk_score: avgRiskScore,
         prs_today: todayCount,
-        repositories_tracked: 0, // Will be filled below
+        repositories_tracked: totalRepos,
       },
       risk_distribution: distribution,
       top_risky_prs: topRiskyResult.rows,
       recent_prs: recentResult.rows,
     });
-
-    // Async: fill in repo count (non-blocking enhancement)
   } catch (err) {
     console.error('[AnalyticsController] Error fetching overview:', err.message);
     res.status(500).json({ error: 'Internal server error' });
