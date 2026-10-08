@@ -203,6 +203,8 @@ async function syncRepo(req, res) {
     const repoInfo = {
       html_url: `https://github.com/${owner}/${repo}`,
       language: 'JavaScript',
+      name: repo,
+      owner: { login: owner }
     };
 
     let syncedCount = 0;
