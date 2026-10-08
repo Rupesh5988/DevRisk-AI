@@ -48,6 +48,7 @@ export const getHealth = () => api.get('/health');
 export const listRepos = () => api.get('/repos');
 export const addRepo = (githubUrl) => api.post('/repos', { github_url: githubUrl });
 export const getRepo = (id) => api.get(`/repos/${id}`);
+export const syncRepoPRs = (id) => api.post(`/repos/${id}/sync`);
 
 // ---- Pull Requests ----
 export const getPRsByRepo = (repoId, page = 1, limit = 20, riskLabel = null) => {

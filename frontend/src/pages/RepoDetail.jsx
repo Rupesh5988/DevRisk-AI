@@ -6,9 +6,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getRepo, getPRsByRepo } from '../services/api';
+import { getRepo, getPRsByRepo, syncRepoPRs } from '../services/api';
 import PRTable from '../components/PRTable';
-import { AlertTriangle, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, RefreshCw } from 'lucide-react';
 
 export default function RepoDetail() {
   const { id } = useParams();
@@ -17,27 +17,42 @@ export default function RepoDetail() {
   const [prs, setPrs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+
+  async function fetchAllData() {
+    try {
+      const [repoRes, prsRes] = await Promise.all([
+        getRepo(id),
+        getPRsByRepo(id)
+      ]);
+      setRepo(repoRes.data.repository);
+      setPrs(prsRes.data.pull_requests || []);
+    } catch (err) {
+      console.error('Failed to fetch repo details:', err);
+      setError('Repository not found or failed to load.');
+    }
+  }
+
+  const handleSync = async () => {
+    try {
+      setSyncing(true);
+      await syncRepoPRs(id);
+      await fetchAllData();
+    } catch (err) {
+      console.error('Failed to sync PRs:', err);
+      alert('Failed to sync PRs from GitHub. Note: GitHub rate limits may apply.');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        setLoading(true);
-        // We use getRepo (which we need to add to api.js if not there, or use listRepos and filter)
-        // Wait, getRepo is exported in api.js as `export const getRepo = (id) => api.get('/repos/${id}');`
-        const [repoRes, prsRes] = await Promise.all([
-          getRepo(id),
-          getPRsByRepo(id)
-        ]);
-        setRepo(repoRes.data.repository);
-        setPrs(prsRes.data.pull_requests || []);
-      } catch (err) {
-        console.error('Failed to fetch repo details:', err);
-        setError('Repository not found or failed to load.');
-      } finally {
-        setLoading(false);
-      }
+    async function init() {
+      setLoading(true);
+      await fetchAllData();
+      setLoading(false);
     }
-    fetchData();
+    init();
   }, [id]);
 
   if (loading) {
@@ -77,10 +92,23 @@ export default function RepoDetail() {
             Repository Details
           </span>
         </div>
-        <h1 className="page-title">{repo.name}</h1>
-        <p className="page-subtitle">
-          {repo.owner}/{repo.name} {repo.language ? `• ${repo.language}` : ''}
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h1 className="page-title">{repo.name}</h1>
+            <p className="page-subtitle">
+              {repo.owner}/{repo.name} {repo.language ? `• ${repo.language}` : ''}
+            </p>
+          </div>
+          <button
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+            onClick={handleSync}
+            disabled={syncing}
+          >
+            <RefreshCw size={16} className={syncing ? 'spin' : ''} />
+            {syncing ? 'Syncing...' : 'Sync PRs from GitHub'}
+          </button>
+        </div>
       </div>
 
       <div className="stats-grid" style={{ marginBottom: 32 }}>

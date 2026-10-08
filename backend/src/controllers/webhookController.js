@@ -60,7 +60,7 @@ async function handleWebhook(req, res) {
  * Core processing pipeline for a Pull Request event.
  * This runs AFTER the webhook response has been sent.
  */
-async function processPullRequest(payload) {
+async function processPullRequest(payload, targetRepoId = null) {
   const pr = payload.pull_request;
   const repoData = payload.repository;
   const owner = repoData.owner.login;
@@ -72,22 +72,25 @@ async function processPullRequest(payload) {
   // -------------------------------------------------------
   // Step 2a: Ensure repository exists in our database
   // -------------------------------------------------------
-  let repoRow;
-  const existingRepo = await pool.query(
-    'SELECT * FROM repositories WHERE github_url = $1',
-    [repoData.html_url]
-  );
-
-  if (existingRepo.rows.length > 0) {
-    repoRow = existingRepo.rows[0];
+  let repoRows = [];
+  
+  if (targetRepoId) {
+    const existingRepo = await pool.query('SELECT * FROM repositories WHERE id = $1', [targetRepoId]);
+    if (existingRepo.rows.length > 0) repoRows = existingRepo.rows;
   } else {
+    const existingRepos = await pool.query('SELECT * FROM repositories WHERE github_url = $1', [repoData.html_url]);
+    repoRows = existingRepos.rows;
+  }
+
+  if (repoRows.length === 0) {
+    // If no specific repo was found (e.g. they added webhook before adding in UI), just insert a generic one
     const insertResult = await pool.query(
       `INSERT INTO repositories (github_url, name, owner, language)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
       [repoData.html_url, repo, owner, repoData.language || null]
     );
-    repoRow = insertResult.rows[0];
+    repoRows = [insertResult.rows[0]];
     console.log(`[Webhook] New repository registered: ${owner}/${repo}`);
   }
 
@@ -134,71 +137,74 @@ async function processPullRequest(payload) {
   }
 
   // -------------------------------------------------------
+  // -------------------------------------------------------
   // Step 2g: Store everything in PostgreSQL
   // -------------------------------------------------------
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Upsert the Pull Request record
-    const prResult = await client.query(
-      `INSERT INTO pull_requests (repo_id, pr_number, title, author, risk_score, risk_label,
-                                   additions, deletions, files_changed, status, github_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (repo_id, pr_number)
-       DO UPDATE SET risk_score = $5, risk_label = $6, additions = $7, deletions = $8,
-                     files_changed = $9, title = $3, status = $10
-       RETURNING id`,
-      [
-        repoRow.id,
-        prNumber,
-        pr.title,
-        pr.user.login,
-        riskScore,
-        riskLabel,
-        pr.additions || 0,
-        pr.deletions || 0,
-        prFiles.length,
-        pr.state || 'open',
-        pr.html_url,
-      ]
-    );
-    const prId = prResult.rows[0].id;
-
-    // Upsert features
-    await client.query(
-      `INSERT INTO pr_features (pr_id, ns, nd, nf, entropy, la, ld, lt, fix, ndev, age, nuc, exp, rexp, sexp)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-       ON CONFLICT (pr_id)
-       DO UPDATE SET ns=$2, nd=$3, nf=$4, entropy=$5, la=$6, ld=$7, lt=$8, fix=$9,
-                     ndev=$10, age=$11, nuc=$12, exp=$13, rexp=$14, sexp=$15`,
-      [prId, features.ns, features.nd, features.nf, features.entropy, features.la,
-       features.ld, features.lt, features.fix, features.ndev, features.age,
-       features.nuc, features.exp, features.rexp, features.sexp]
-    );
-
-    // Delete old SHAP explanations and insert new ones
-    await client.query('DELETE FROM shap_explanations WHERE pr_id = $1', [prId]);
-    for (const expl of explanations) {
-      await client.query(
-        `INSERT INTO shap_explanations (pr_id, feature_name, shap_value, feature_value, explanation)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [prId, expl.feature_name, expl.shap_value, expl.feature_value, expl.explanation]
+    for (const repoRow of repoRows) {
+      // Upsert the Pull Request record for this specific repo_id
+      const prResult = await client.query(
+        `INSERT INTO pull_requests (repo_id, pr_number, title, author, risk_score, risk_label,
+                                     additions, deletions, files_changed, status, github_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (repo_id, pr_number)
+         DO UPDATE SET risk_score = $5, risk_label = $6, additions = $7, deletions = $8,
+                       files_changed = $9, title = $3, status = $10
+         RETURNING id`,
+        [
+          repoRow.id,
+          prNumber,
+          pr.title,
+          pr.user.login,
+          riskScore,
+          riskLabel,
+          pr.additions || 0,
+          pr.deletions || 0,
+          prFiles.length,
+          pr.state || 'open',
+          pr.html_url,
+        ]
       );
-    }
+      const prId = prResult.rows[0].id;
 
-    // Delete old dependency edges and insert new ones
-    await client.query('DELETE FROM dependency_edges WHERE pr_id = $1', [prId]);
-    for (const edge of dependencyGraph.edges) {
+      // Upsert features
       await client.query(
-        `INSERT INTO dependency_edges (repo_id, pr_id, source_file, target_file)
-         VALUES ($1, $2, $3, $4)`,
-        [repoRow.id, prId, edge.source, edge.target]
+        `INSERT INTO pr_features (pr_id, ns, nd, nf, entropy, la, ld, lt, fix, ndev, age, nuc, exp, rexp, sexp)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+         ON CONFLICT (pr_id)
+         DO UPDATE SET ns=$2, nd=$3, nf=$4, entropy=$5, la=$6, ld=$7, lt=$8, fix=$9,
+                       ndev=$10, age=$11, nuc=$12, exp=$13, rexp=$14, sexp=$15`,
+        [prId, features.ns, features.nd, features.nf, features.entropy, features.la,
+         features.ld, features.lt, features.fix, features.ndev, features.age,
+         features.nuc, features.exp, features.rexp, features.sexp]
       );
+
+      // Delete old SHAP explanations and insert new ones
+      await client.query('DELETE FROM shap_explanations WHERE pr_id = $1', [prId]);
+      for (const expl of explanations) {
+        await client.query(
+          `INSERT INTO shap_explanations (pr_id, feature_name, shap_value, feature_value, explanation)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [prId, expl.feature_name, expl.shap_value, expl.feature_value, expl.explanation]
+        );
+      }
+
+      // Delete old dependency edges and insert new ones
+      await client.query('DELETE FROM dependency_edges WHERE pr_id = $1', [prId]);
+      for (const edge of dependencyGraph.edges) {
+        await client.query(
+          `INSERT INTO dependency_edges (repo_id, pr_id, source_file, target_file)
+           VALUES ($1, $2, $3, $4)`,
+          [repoRow.id, prId, edge.source, edge.target]
+        );
+      }
     }
 
     await client.query('COMMIT');
-    console.log(`[Webhook] PR #${prNumber} — all data stored successfully`);
+    console.log(`[Webhook] PR #${prNumber} — all data stored successfully for ${repoRows.length} repo(s)`);
   } catch (dbErr) {
     await client.query('ROLLBACK');
     console.error('[Webhook] Database transaction failed:', dbErr.message);

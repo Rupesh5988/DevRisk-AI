@@ -178,4 +178,56 @@ async function getRepoById(req, res) {
   }
 }
 
-module.exports = { listRepos, addRepo, getRepoById };
+/**
+ * POST /api/repos/:id/sync
+ *
+ * Manually fetches recent PRs for a repository and processes them.
+ */
+async function syncRepo(req, res) {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      'SELECT owner, name FROM repositories WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Repository not found' });
+    }
+
+    const { owner, name: repo } = result.rows[0];
+    const { processPullRequest } = require('./webhookController');
+    const recentPRs = await githubService.getRecentPRs(owner, repo, 10);
+
+    const repoInfo = {
+      html_url: `https://github.com/${owner}/${repo}`,
+      language: 'JavaScript',
+      name: repo,
+      owner: { login: owner }
+    };
+
+    let syncedCount = 0;
+    for (const pr of recentPRs) {
+      const mockPayload = {
+        action: 'opened', // Force a risk assessment
+        pull_request: pr,
+        repository: repoInfo,
+      };
+      
+      try {
+        await processPullRequest(mockPayload, null);
+        syncedCount++;
+      } catch (err) {
+        console.error(`[RepoController] Sync failed for PR #${pr.number}:`, err.message);
+      }
+    }
+
+    res.json({ message: `Successfully synced ${syncedCount} Pull Requests.` });
+  } catch (err) {
+    console.error('[RepoController] Error syncing repo:', err.message);
+    res.status(500).json({ error: 'Internal server error during sync' });
+  }
+}
+
+module.exports = { listRepos, addRepo, getRepoById, syncRepo };
