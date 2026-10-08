@@ -24,6 +24,7 @@ const prRoutes = require('./routes/prRoutes');
 const repoRoutes = require('./routes/repoRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const authRoutes = require('./routes/authRoutes');
+const groundTruthRoutes = require('./routes/groundTruthRoutes');
 
 // ML Service health check
 const mlService = require('./services/mlService');
@@ -76,6 +77,7 @@ app.use('/api/webhook', webhookRoutes);
 app.use('/api/prs', prRoutes);
 app.use('/api/repos', repoRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api', groundTruthRoutes); // Ground Truth & Model Validation endpoints
 
 // 404 handler for unmatched routes
 app.use((_req, res) => {

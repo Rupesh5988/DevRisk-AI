@@ -74,4 +74,14 @@ export const getTrends = (days = 30, repoId = null) => {
   return api.get('/analytics/trends', { params });
 };
 
+// ---- Ground Truth & Model Validation ----
+export const getGroundTruthByPR    = (prId)          => api.get(`/ground-truth/pr/${prId}`);
+export const analyzeGroundTruth    = (prId)          => api.post(`/ground-truth/analyze/${prId}`);
+export const getGroundTruthByRepo  = (repoId)        => api.get(`/ground-truth/repository/${repoId}`);
+export const getValidationSummary  = ()              => api.get('/model-validation/summary');
+export const getConfusionMatrix    = ()              => api.get('/model-validation/confusion-matrix');
+export const getCalibration        = ()              => api.get('/model-validation/calibration');
+export const getThresholdAnalysis  = ()              => api.get('/model-validation/threshold-analysis');
+export const getExplanationValidation = (prId)       => api.get(`/explanation-validation/${prId}`);
+
 export default api;

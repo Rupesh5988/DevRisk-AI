@@ -10,20 +10,14 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
-const SUB_SETTINGS = [
-  { id: 'profile', label: 'Profile & Account', icon: '👤', desc: 'User details & preferences' },
-  { id: 'system', label: 'System Status', icon: '🖥️', desc: 'API, ML Service & DB health' },
-  { id: 'ml-engine', label: 'ML Engine & Metrics', icon: '🧠', desc: 'XGBoost, SHAP & accuracy' },
-  { id: 'webhooks', label: 'Webhook Configuration', icon: '🪝', desc: 'GitHub PR webhook setup' },
-  { id: 'env', label: 'Environment Variables', icon: '⚙️', desc: 'Backend .env configuration' },
-];
+import { Moon, Sun, Settings, LogOut } from 'lucide-react';
+
 
 export default function UserDropdown() {
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
   // Close when clicking outside
@@ -31,14 +25,12 @@ export default function UserDropdown() {
     function handleClickOutside(event) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsOpen(false);
-        setIsSettingsOpen(false);
       }
     }
 
     function handleKeyDown(event) {
       if (event.key === 'Escape') {
         setIsOpen(false);
-        setIsSettingsOpen(false);
       }
     }
 
@@ -58,19 +50,16 @@ export default function UserDropdown() {
 
   function handleNavigateSubSetting(tab) {
     setIsOpen(false);
-    setIsSettingsOpen(false);
     navigate(`/settings?tab=${tab}`);
   }
 
   function handleOpenAllSettings() {
     setIsOpen(false);
-    setIsSettingsOpen(false);
     navigate('/settings');
   }
 
   function handleLogout() {
     setIsOpen(false);
-    setIsSettingsOpen(false);
     logout();
     navigate('/login');
   }
@@ -83,7 +72,7 @@ export default function UserDropdown() {
         className={`top-user-avatar-btn ${isOpen ? 'active' : ''}`}
         onClick={() => {
           setIsOpen((prev) => !prev);
-          if (isOpen) setIsSettingsOpen(false);
+          if (isOpen) {}
         }}
         title={`${user.full_name || user.username} — Settings & Profile`}
         aria-label="User profile, settings and theme menu"
@@ -97,7 +86,11 @@ export default function UserDropdown() {
       {isOpen && (
         <div className="user-dropdown-panel user-dropdown-sliding-panel">
           {/* User Profile Header */}
-          <div className="user-dropdown-profile">
+          <div 
+            className="user-dropdown-profile"
+            onClick={() => handleNavigateSubSetting('profile')}
+            style={{ cursor: 'pointer' }}
+          >
             <div className="user-dropdown-avatar">{initial}</div>
             <div className="user-dropdown-profile-info">
               <div className="user-dropdown-name">{user.full_name || user.username}</div>
@@ -111,72 +104,38 @@ export default function UserDropdown() {
           <div className="user-dropdown-divider" />
 
           {/* Settings Tab — Clickable Icon & Row that Slides open the Sub-Settings */}
-          <div className="user-dropdown-settings-accordion">
-            <div
-              className={`user-dropdown-item user-dropdown-settings-header ${isSettingsOpen ? 'active-header' : ''}`}
-              onClick={() => setIsSettingsOpen((prev) => !prev)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setIsSettingsOpen((prev) => !prev);
-                }
+          {/* Settings Tab */}
+          <div
+            className="user-dropdown-item user-dropdown-settings-header"
+            onClick={handleOpenAllSettings}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleOpenAllSettings();
+              }
+            }}
+            style={{ cursor: 'pointer' }}
+          >
+            <button
+              type="button"
+              className="user-dropdown-icon-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenAllSettings();
               }}
+              title="Open Settings"
+              aria-label="Open Settings"
             >
-              <button
-                type="button"
-                className={`user-dropdown-icon-btn ${isSettingsOpen ? 'spinning' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsSettingsOpen((prev) => !prev);
-                }}
-                title={isSettingsOpen ? "Click to slide close sub-settings" : "Click to slide open sub-settings"}
-                aria-label="Toggle sub-settings slider"
-              >
-                ⚙️
-              </button>
+              <Settings size={16} />
+            </button>
 
-              <div className="user-dropdown-item-text" style={{ flex: 1 }}>
-                <span className="user-dropdown-item-title">Settings</span>
-                <span className="user-dropdown-item-desc">
-                  {isSettingsOpen ? 'Click to slide close' : 'Click icon to slide open'}
-                </span>
-              </div>
-
-              <span className={`user-dropdown-chevron ${isSettingsOpen ? 'open' : ''}`}>
-                ▾
+            <div className="user-dropdown-item-text" style={{ flex: 1 }}>
+              <span className="user-dropdown-item-title">Settings</span>
+              <span className="user-dropdown-item-desc">
+                Open Full Settings Dashboard
               </span>
-            </div>
-
-            {/* Sliding Sub-Settings Container */}
-            <div className={`user-dropdown-sliding-tray ${isSettingsOpen ? 'open' : ''}`}>
-              <div className="user-dropdown-sliding-inner">
-                {SUB_SETTINGS.map((sub) => (
-                  <button
-                    key={sub.id}
-                    type="button"
-                    className="user-dropdown-subitem"
-                    onClick={() => handleNavigateSubSetting(sub.id)}
-                  >
-                    <span className="user-dropdown-subitem-icon">{sub.icon}</span>
-                    <div className="user-dropdown-subitem-text">
-                      <span className="user-dropdown-subitem-title">{sub.label}</span>
-                      <span className="user-dropdown-subitem-desc">{sub.desc}</span>
-                    </div>
-                    <span className="user-dropdown-subitem-arrow">→</span>
-                  </button>
-                ))}
-
-                <button
-                  type="button"
-                  className="user-dropdown-view-all-btn"
-                  onClick={handleOpenAllSettings}
-                >
-                  <span>Open Full Settings Dashboard</span>
-                  <span>↗</span>
-                </button>
-              </div>
             </div>
           </div>
 
@@ -185,7 +144,7 @@ export default function UserDropdown() {
           {/* Theme Toggle in Dropdown */}
           <div className="user-dropdown-theme-row">
             <div className="user-dropdown-theme-label">
-              <span className="user-dropdown-item-icon">{isDark ? '🌙' : '☀️'}</span>
+              <span className="user-dropdown-item-icon">{isDark ? <Moon size={16} /> : <Sun size={16} />}</span>
               <span>{isDark ? 'Dark Theme' : 'Light Theme'}</span>
             </div>
             <button
@@ -209,7 +168,7 @@ export default function UserDropdown() {
             className="user-dropdown-logout-btn"
             onClick={handleLogout}
           >
-            <span className="user-dropdown-item-icon">🚪</span>
+            <span className="user-dropdown-item-icon"><LogOut size={16} /></span>
             <span>Sign Out</span>
           </button>
         </div>

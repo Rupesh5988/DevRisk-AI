@@ -72,7 +72,7 @@ export default function Repositories() {
     <>
       <div className="page-header">
         <h1 className="page-title">Repositories</h1>
-        <p className="page-subtitle">GitHub repositories being tracked for PR risk analysis</p>
+
       </div>
 
       {/* Add Repository Form */}

@@ -254,7 +254,7 @@ export default function Simulator() {
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <h1 className="page-title">⚡ DevRisk Playground</h1>
+            <h1 className="page-title">Playground</h1>
             <p className="page-subtitle">
               Interactive developer sandbox to test code change risk, tune 14 metrics, and preview CI/CD gates.
             </p>
@@ -264,17 +264,17 @@ export default function Simulator() {
               className="btn btn-secondary"
               onClick={handleCopyMarkdown}
               disabled={!simData}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, minWidth: 165 }}
             >
-              {copied ? '✅ Copied!' : '📋 Copy PR Comment'}
+              {copied ? 'Copied' : 'Copy PR Comment'}
             </button>
             <button
               className="btn btn-primary"
               onClick={handleSaveToDb}
               disabled={savingToDb || loading}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, minWidth: 185 }}
             >
-              {savingToDb ? '💾 Saving...' : '💾 Save to Tracked PRs'}
+              {savingToDb ? 'Saving...' : 'Save to Tracked PRs'}
             </button>
           </div>
         </div>
@@ -294,7 +294,7 @@ export default function Simulator() {
         }}>
           <div>
             <strong style={{ color: 'var(--risk-low)', fontSize: 14 }}>
-              ✅ Simulated PR Successfully Persisted to Database!
+              Simulated PR Successfully Persisted to Database!
             </strong>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
               "{savedPr.title}" is now permanently recorded in PostgreSQL and visible on Dashboard and Repository views.
@@ -857,7 +857,7 @@ export default function Simulator() {
                     color: features.fix ? 'var(--risk-high)' : 'var(--text-secondary)',
                   }}
                 >
-                  {features.fix ? '🛑 YES (Fix Commit)' : '✅ NO (Feature/Refactor)'}
+                  {features.fix ? 'YES (Fix Commit)' : 'NO (Feature/Refactor)'}
                 </button>
               </div>
             </div>
@@ -901,7 +901,7 @@ export default function Simulator() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{ fontSize: 16 }}>
-                    {cicd.status === 'MERGE_BLOCKED' ? '🛑' : cicd.status === 'MANUAL_REVIEW_REQUIRED' ? '⚠️' : '✅'}
+                    {cicd.status === 'MERGE_BLOCKED' ? 'BLOCKED' : cicd.status === 'MANUAL_REVIEW_REQUIRED' ? 'REVIEW REQUIRED' : 'PASSED'}
                   </span>
                   <strong
                     style={{

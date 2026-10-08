@@ -7,11 +7,17 @@
 // ============================================================
 
 import React, { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { FEATURE_DEFINITIONS, FEATURE_CATEGORIES } from '../utils/featureDefinitions';
 
 export default function MetricsDictionary() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [metricSearch, setMetricSearch] = useState('');
   const [metricCategory, setMetricCategory] = useState('ALL');
+
+  const fromName = location.state?.from;
+  const fromPath = location.state?.path;
 
   const featureList = Object.values(FEATURE_DEFINITIONS);
   const filteredMetrics = featureList.filter((f) => {
@@ -28,6 +34,31 @@ export default function MetricsDictionary() {
 
   return (
     <div className="dashboard-container">
+      {fromName && fromPath && (
+        <button
+          onClick={() => navigate(fromPath)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            background: 'var(--bg-glass)',
+            border: '1px solid var(--border-subtle)',
+            color: 'var(--text-primary)',
+            padding: '6px 14px',
+            borderRadius: 20,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+            marginBottom: 20,
+            transition: 'background 0.2s',
+          }}
+          onMouseOver={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
+          onMouseOut={(e) => e.currentTarget.style.background = 'var(--bg-glass)'}
+        >
+          ← Back to {fromName}
+        </button>
+      )}
+
       {/* Page Header */}
       <div className="page-header" style={{ marginBottom: 20 }}>
         <div>

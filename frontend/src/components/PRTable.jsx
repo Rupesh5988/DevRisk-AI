@@ -74,7 +74,33 @@ export default function PRTable({ pullRequests = [], showRepo = false }) {
               </span>
             </td>
             <td style={{ textTransform: 'capitalize' }}>
-              {pr.status || 'open'}
+              <div style={{ marginBottom: 4 }}>{pr.status || 'open'}</div>
+              {pr.ground_truth_status && (
+                <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                  <span style={{
+                    padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap',
+                    background: pr.ground_truth_status === 'DEFECT_INDUCING' ? 'rgba(239, 68, 68, 0.15)' :
+                                pr.ground_truth_status === 'NON_DEFECT_INDUCING' ? 'rgba(34, 197, 94, 0.15)' :
+                                'rgba(156, 163, 175, 0.15)',
+                    color: pr.ground_truth_status === 'DEFECT_INDUCING' ? 'var(--risk-high)' :
+                           pr.ground_truth_status === 'NON_DEFECT_INDUCING' ? 'var(--risk-low)' :
+                           'var(--text-secondary)'
+                  }}>
+                    {pr.ground_truth_status.replace(/_/g, ' ')}
+                  </span>
+                  {pr.evaluation_result && pr.evaluation_result !== 'NOT_EVALUATED' && (
+                    <span style={{
+                      padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap',
+                      background: ['TRUE_POSITIVE', 'TRUE_NEGATIVE'].includes(pr.evaluation_result) ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                      color: ['TRUE_POSITIVE', 'TRUE_NEGATIVE'].includes(pr.evaluation_result) ? 'var(--risk-low)' : 'var(--risk-high)'
+                    }}>
+                      {pr.evaluation_result === 'TRUE_POSITIVE' ? 'TP' :
+                       pr.evaluation_result === 'TRUE_NEGATIVE' ? 'TN' :
+                       pr.evaluation_result === 'FALSE_POSITIVE' ? 'FP' : 'FN'}
+                    </span>
+                  )}
+                </div>
+              )}
             </td>
             <td style={{ fontSize: 13, color: 'var(--text-muted)' }}>
               {pr.created_at

@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { registerUser } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { ArrowLeft } from 'lucide-react';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -49,11 +50,23 @@ export default function Register() {
   }
 
   return (
-    <div className="auth-page">
+    <div className="auth-page" style={{ position: 'relative' }}>
+      <button 
+        onClick={() => navigate('/')} 
+        style={{ position: 'absolute', top: 24, left: 24, background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 500 }}
+        className="back-to-home-btn"
+      >
+        <ArrowLeft size={18} /> Back to home
+      </button>
+
       <div className="auth-card animate-in">
         {/* Logo */}
         <div className="auth-logo">
-          <span className="auth-logo-icon">🛡️</span>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+            <div style={{ width: 64, height: 64, borderRadius: 16, overflow: 'hidden' }}>
+              <img src="/logo.jpg" alt="DevRisk AI" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+          </div>
           <h1 className="auth-title">DevRisk AI</h1>
           <p className="auth-subtitle">Start analyzing your Pull Requests</p>
         </div>

@@ -10,18 +10,19 @@ import { useSearchParams } from 'react-router-dom';
 import { getHealth } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { User, Server, BrainCircuit, Webhook, Settings2, Moon, Sun } from 'lucide-react';
 
 const SUB_SETTINGS = [
-  { id: 'system', label: 'System Status', icon: '🖥️', desc: 'Backend, ML service and database health' },
-  { id: 'ml-engine', label: 'ML Engine & Metrics', icon: '🧠', desc: 'Model architecture and walk-forward accuracy' },
-  { id: 'webhooks', label: 'Webhook Config', icon: '🪝', desc: 'GitHub Pull Request integration setup' },
-  { id: 'env', label: 'Environment Variables', icon: '⚙️', desc: 'Server configuration & credentials reference' },
-  { id: 'profile', label: 'User Profile & Account', icon: '👤', desc: 'Account credentials and session details' },
+  { id: 'profile', label: 'User Profile & Account', icon: <User size={18} />, desc: 'Account credentials and session details' },
+  { id: 'system', label: 'System Status', icon: <Server size={18} />, desc: 'Backend, ML service and database health' },
+  { id: 'ml-engine', label: 'ML Engine & Metrics', icon: <BrainCircuit size={18} />, desc: 'Model architecture and walk-forward accuracy' },
+  { id: 'webhooks', label: 'Webhook Config', icon: <Webhook size={18} />, desc: 'GitHub Pull Request integration setup' },
+  { id: 'env', label: 'Environment Variables', icon: <Settings2 size={18} />, desc: 'Server configuration & credentials reference' },
 ];
 
 export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'system';
+  const activeTab = searchParams.get('tab') || 'profile';
 
   const { user } = useAuth();
   const { isDark, toggleTheme } = useTheme();
@@ -385,7 +386,9 @@ export default function Settings() {
                 onClick={toggleTheme}
                 style={{ display: 'flex', alignItems: 'center', gap: 8 }}
               >
-                <span>{isDark ? '🌙' : '☀️'}</span>
+                <span style={{ display: 'flex', alignItems: 'center' }}>
+                  {isDark ? <Moon size={16} /> : <Sun size={16} />}
+                </span>
                 <span>Switch to {isDark ? 'Light' : 'Dark'} Theme</span>
               </button>
             </div>

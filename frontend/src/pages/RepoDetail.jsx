@@ -8,6 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getRepo, getPRsByRepo } from '../services/api';
 import PRTable from '../components/PRTable';
+import { AlertTriangle, ArrowLeft } from 'lucide-react';
 
 export default function RepoDetail() {
   const { id } = useParams();
@@ -51,11 +52,11 @@ export default function RepoDetail() {
   if (error || !repo) {
     return (
       <div className="empty-state">
-        <div className="empty-state-icon">⚠️</div>
+        <div className="empty-state-icon"><AlertTriangle size={32} /></div>
         <div className="empty-state-title">Error</div>
         <div className="empty-state-text">{error}</div>
-        <button className="btn btn-secondary" onClick={() => navigate('/repos')}>
-          ← Back to Repositories
+        <button className="btn btn-secondary" onClick={() => navigate('/')}>
+          <ArrowLeft size={16} style={{ marginRight: 6 }} /> Back to Dashboard
         </button>
       </div>
     );
@@ -67,10 +68,10 @@ export default function RepoDetail() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
           <button
             className="btn btn-secondary"
-            style={{ padding: '6px 12px', fontSize: 13 }}
-            onClick={() => navigate('/repos')}
+            style={{ padding: '6px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: '6px' }}
+            onClick={() => navigate('/')}
           >
-            ← Back
+            <ArrowLeft size={14} /> Back
           </button>
           <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
             Repository Details

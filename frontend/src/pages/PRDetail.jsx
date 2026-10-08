@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getPRDetail } from '../services/api';
+import { getPRDetail, getGroundTruthByPR, analyzeGroundTruth } from '../services/api';
 import RiskGauge from '../components/RiskGauge';
 import ShapCard from '../components/ShapCard';
 import GraphView from '../components/GraphView';
@@ -21,6 +21,8 @@ export default function PRDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [gtData, setGtData] = useState(null);
+  const [gtLoading, setGtLoading] = useState(false);
 
   useEffect(() => {
     async function fetchPR() {
@@ -28,6 +30,13 @@ export default function PRDetail() {
         setLoading(true);
         const res = await getPRDetail(id);
         setData(res.data);
+        
+        try {
+          const gtRes = await getGroundTruthByPR(id);
+          setGtData(gtRes.data);
+        } catch (gtErr) {
+          console.error('Failed to fetch ground truth:', gtErr);
+        }
       } catch (err) {
         console.error('Failed to fetch PR detail:', err);
         setError('Failed to load pull request details.');
@@ -114,6 +123,19 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
     setTimeout(() => setCopied(false), 3000);
   };
 
+  const handleRunGroundTruth = async () => {
+    try {
+      setGtLoading(true);
+      const res = await analyzeGroundTruth(id);
+      setGtData(res.data);
+    } catch (err) {
+      console.error('Failed to run ground truth analysis:', err);
+      alert('Failed to run analysis. Check console for details.');
+    } finally {
+      setGtLoading(false);
+    }
+  };
+
   const handleSimulateInPlayground = () => {
     navigate('/simulator', {
       state: {
@@ -161,15 +183,14 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
             <button
               className="btn btn-secondary"
               onClick={handleCopyReviewComment}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '7px 14px' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, padding: '7px 14px', width: 210 }}
             >
               <span>{copied ? '✅' : '📋'}</span>
               <span>{copied ? 'Copied to Clipboard!' : 'Copy Review Comment'}</span>
             </button>
-
             <button
               className="btn btn-secondary"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-devrisk-glossary'))}
+              onClick={() => navigate('/metrics-dictionary', { state: { from: 'PR Detail', path: `/prs/${pr.id}` } })}
               style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '7px 14px' }}
               title="Open full 28-metric dictionary"
             >
@@ -215,6 +236,81 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
         </p>
       </div>
 
+      {/* ──────────────────────────────────────────────────────────── */}
+      {/* GROUND TRUTH VALIDATION SECTION                             */}
+      {/* ──────────────────────────────────────────────────────────── */}
+      {gtData && (
+        <div className="card animate-in" style={{ padding: 24, marginBottom: 28, background: 'var(--bg-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+            <div>
+              <h3 className="card-title" style={{ fontSize: 17, marginBottom: 4 }}>Ground Truth Validation</h3>
+              <span className="card-subtitle" style={{ display: 'block', marginBottom: 12 }}>
+                Independently verified defect status via SZZ (commit history analysis).
+              </span>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+                  <strong style={{ color: 'var(--text-muted)' }}>STATUS:</strong>
+                  <span style={{ 
+                    padding: '2px 8px', borderRadius: 12, fontWeight: 700, fontSize: 11,
+                    background: gtData.ground_truth_status === 'DEFECT_INDUCING' ? 'rgba(239, 68, 68, 0.15)' :
+                                gtData.ground_truth_status === 'NON_DEFECT_INDUCING' ? 'rgba(34, 197, 94, 0.15)' :
+                                'rgba(156, 163, 175, 0.15)',
+                    color: gtData.ground_truth_status === 'DEFECT_INDUCING' ? 'var(--risk-high)' :
+                           gtData.ground_truth_status === 'NON_DEFECT_INDUCING' ? 'var(--risk-low)' :
+                           'var(--text-secondary)'
+                  }}>
+                    {gtData.ground_truth_status.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+                  <strong style={{ color: 'var(--text-muted)' }}>CONFIDENCE:</strong>
+                  <span>{gtData.confidence}</span>
+                </div>
+                {gtData.evaluation_result !== 'NOT_EVALUATED' && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+                    <strong style={{ color: 'var(--text-muted)' }}>PREDICTION OUTCOME:</strong>
+                    <span style={{ 
+                      padding: '2px 8px', borderRadius: 12, fontWeight: 700, fontSize: 11,
+                      background: ['TRUE_POSITIVE', 'TRUE_NEGATIVE'].includes(gtData.evaluation_result) ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                      color: ['TRUE_POSITIVE', 'TRUE_NEGATIVE'].includes(gtData.evaluation_result) ? 'var(--risk-low)' : 'var(--risk-high)'
+                    }}>
+                      {gtData.evaluation_result.replace('_', ' ')}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <button 
+              className="btn btn-secondary" 
+              onClick={handleRunGroundTruth} 
+              disabled={gtLoading}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '7px 14px' }}
+            >
+              <span>{gtLoading ? '⏳' : '🔄'}</span>
+              <span>{gtLoading ? 'Analyzing...' : 'Run SZZ Analysis'}</span>
+            </button>
+          </div>
+
+          {gtData.evidence && gtData.evidence.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <strong style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Evidence Log</strong>
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {gtData.evidence.map((ev, idx) => (
+                  <div key={idx} style={{ padding: 12, background: 'var(--bg-glass)', border: '1px solid var(--border-subtle)', borderRadius: 6, fontSize: 13, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <span style={{ fontSize: 16 }}>{ev.strength === 'HIGH' ? '🔥' : ev.strength === 'MEDIUM' ? '🔍' : '📝'}</span>
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{ev.evidence_type.replace(/_/g, ' ')} <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11 }}>({ev.strength})</span></div>
+                      <div style={{ color: 'var(--text-secondary)' }}>{ev.description}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Risk Gauge + SHAP Drivers side-by-side */}
       <div className="grid-2" style={{ marginBottom: 28 }}>
         <div className="card animate-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
@@ -252,10 +348,9 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
                 Every observed metric from this commit, its meaning, and how it impacts the risk score.
               </span>
             </div>
-
             <button
               className="btn btn-secondary"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-devrisk-glossary'))}
+              onClick={() => navigate('/metrics-dictionary', { state: { from: 'PR Detail', path: `/prs/${pr.id}` } })}
               style={{ fontSize: 12, padding: '6px 12px' }}
             >
               📖 Open Feature Dictionary

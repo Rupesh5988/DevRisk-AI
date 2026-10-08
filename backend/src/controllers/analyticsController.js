@@ -63,9 +63,12 @@ async function getOverview(req, res) {
     const recentResult = await pool.query(`
       SELECT pr.id, pr.pr_number, pr.title, pr.author, pr.risk_score, pr.risk_label,
              pr.additions, pr.deletions, pr.files_changed, pr.created_at,
-             r.name AS repo_name, r.owner AS repo_owner
+             r.name AS repo_name, r.owner AS repo_owner,
+             gtr.ground_truth_status, pe.evaluation_result
       FROM pull_requests pr
       JOIN repositories r ON pr.repo_id = r.id
+      LEFT JOIN ground_truth_records gtr ON gtr.pr_id = pr.id
+      LEFT JOIN prediction_evaluations pe ON pe.pr_id = pr.id
       ORDER BY pr.created_at DESC
       LIMIT 10
     `);
