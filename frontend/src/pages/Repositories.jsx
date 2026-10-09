@@ -7,7 +7,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listRepos, addRepo } from '../services/api';
+import { listRepos, addRepo, deleteRepo } from '../services/api';
+import { Trash2 } from 'lucide-react';
 
 function getRiskClass(score) {
   if (score >= 70) return 'high';
@@ -23,6 +24,7 @@ export default function Repositories() {
   const [newUrl, setNewUrl] = useState('');
   const [addLoading, setAddLoading] = useState(false);
   const [addMessage, setAddMessage] = useState(null);
+  const [draggedIdx, setDraggedIdx] = useState(null);
 
   useEffect(() => {
     fetchRepos();
@@ -32,13 +34,64 @@ export default function Repositories() {
     try {
       setLoading(true);
       const res = await listRepos();
-      setRepos(res.data.repositories || []);
+      let fetchedRepos = res.data.repositories || [];
+      
+      // Restore saved order
+      const savedOrder = JSON.parse(localStorage.getItem('devrisk_repos_order') || '[]');
+      if (savedOrder.length > 0) {
+        fetchedRepos.sort((a, b) => {
+          const aIdx = savedOrder.indexOf(a.id);
+          const bIdx = savedOrder.indexOf(b.id);
+          if (aIdx === -1 && bIdx === -1) return 0;
+          if (aIdx === -1) return 1;
+          if (bIdx === -1) return -1;
+          return aIdx - bIdx;
+        });
+      }
+
+      setRepos(fetchedRepos);
     } catch (err) {
       setError('Failed to load repositories');
     } finally {
       setLoading(false);
     }
   }
+
+  const handleDelete = async (e, id) => {
+    e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this repository? This action cannot be undone.')) return;
+    try {
+      await deleteRepo(id);
+      setRepos(prev => prev.filter(r => r.id !== id));
+    } catch (err) {
+      alert('Failed to delete repository');
+    }
+  };
+
+  const handleDragStart = (e, index) => {
+    setDraggedIdx(index);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e, dropIdx) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === dropIdx) return;
+    
+    const newRepos = [...repos];
+    const draggedItem = newRepos[draggedIdx];
+    newRepos.splice(draggedIdx, 1);
+    newRepos.splice(dropIdx, 0, draggedItem);
+    
+    setRepos(newRepos);
+    setDraggedIdx(null);
+
+    const newOrderIds = newRepos.map(r => r.id);
+    localStorage.setItem('devrisk_repos_order', JSON.stringify(newOrderIds));
+  };
 
   async function handleAddRepo(e) {
     e.preventDefault();
@@ -167,31 +220,49 @@ export default function Repositories() {
         </div>
       ) : (
         <div className="stats-grid">
-          {repos.map((repo) => (
+          {repos.map((repo, idx) => (
             <div
               key={repo.id}
               className="stat-card animate-in"
-              style={{ cursor: 'pointer' }}
+              style={{ cursor: 'pointer', position: 'relative' }}
               onClick={() => navigate(`/repos/${repo.id}`)}
+              draggable
+              onDragStart={(e) => handleDragStart(e, idx)}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, idx)}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 12 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {repo.name}
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {repo.owner}/{repo.name}
                   </div>
                 </div>
-                {repo.language && (
-                  <span style={{
-                    fontSize: 11, padding: '3px 10px', borderRadius: 12,
-                    background: 'rgba(99,102,241,0.1)', color: 'var(--accent-primary)',
-                    fontWeight: 600,
-                  }}>
-                    {repo.language}
-                  </span>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  {repo.language && (
+                    <span style={{
+                      fontSize: 11, padding: '3px 10px', borderRadius: 12,
+                      background: 'rgba(99,102,241,0.1)', color: 'var(--accent-primary)',
+                      fontWeight: 600,
+                    }}>
+                      {repo.language}
+                    </span>
+                  )}
+                  <button 
+                    onClick={(e) => handleDelete(e, repo.id)}
+                    style={{
+                      background: 'transparent', border: 'none', color: 'var(--text-muted)', 
+                      cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', transition: 'color 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = 'var(--risk-high)'}
+                    onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                    title="Delete Repository"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: 20, fontSize: 13 }}>

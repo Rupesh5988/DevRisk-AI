@@ -6,7 +6,7 @@
 // ============================================================
 
 import React, { useState, useEffect } from 'react';
-import { getTrends, getOverview, getValidationSummary, getConfusionMatrix, getCalibration, getThresholdAnalysis } from '../services/api';
+import { getTrends, getOverview, getValidationSummary, getConfusionMatrix, getCalibration, getThresholdAnalysis, listAllPRs, analyzeGroundTruth } from '../services/api';
 import TrendChart from '../components/TrendChart';
 import RiskPieChart from '../components/RiskPieChart';
 import { ArrowDown, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
@@ -23,6 +23,67 @@ export default function Analytics() {
   const [calibration, setCalibration] = useState(null);
   const [thresholds, setThresholds] = useState(null);
   const [methodExpanded, setMethodExpanded] = useState(false);
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
+  const [bulkLogs, setBulkLogs] = useState([]);
+
+  const addLog = (msg) => {
+    setBulkLogs(prev => [...prev, msg]);
+  };
+
+  const fetchValidationData = async () => {
+    try {
+      const [sumRes, cmRes, calRes, thrRes] = await Promise.allSettled([
+        getValidationSummary(),
+        getConfusionMatrix(),
+        getCalibration(),
+        getThresholdAnalysis(),
+      ]);
+      if (sumRes.status === 'fulfilled') setValSummary(sumRes.value.data);
+      if (cmRes.status  === 'fulfilled') setConfMatrix(cmRes.value.data);
+      if (calRes.status === 'fulfilled') setCalibration(calRes.value.data);
+      if (thrRes.status === 'fulfilled') setThresholds(thrRes.value.data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleRunBulkAnalysis = async () => {
+    if (bulkRunning) return;
+    setBulkRunning(true);
+    setBulkLogs([]);
+    try {
+      addLog('Fetching pull requests...');
+      const prsRes = await listAllPRs(1, 200);
+      const prs = prsRes.data.pull_requests || [];
+      setBulkProgress({ current: 0, total: prs.length });
+      addLog(`Found ${prs.length} PRs. Starting Ground-Truth analysis...`);
+      
+      let processed = 0;
+      for (const pr of prs) {
+        try {
+          addLog(`Analyzing PR #${pr.id}: ${pr.title}...`);
+          const res = await analyzeGroundTruth(pr.id);
+          addLog(`  -> Result: ${res.data.ground_truth_status} (${res.data.evidence_count} evidence found)`);
+        } catch(err) {
+          addLog(`  -> Error analyzing PR #${pr.id}`);
+          console.warn(`Failed to analyze PR ${pr.id}`, err);
+        }
+        processed++;
+        setBulkProgress({ current: processed, total: prs.length });
+      }
+      addLog('Analysis complete. Refreshing dashboard data...');
+      await fetchValidationData();
+      addLog('Done.');
+    } catch (err) {
+      addLog('Fatal error during bulk analysis.');
+      console.error('Failed bulk analysis', err);
+    } finally {
+      setTimeout(() => {
+        setBulkRunning(false);
+      }, 3000); // Keep logs visible for 3 seconds after completion
+    }
+  };
 
   useEffect(() => {
     async function fetchData() {
@@ -42,20 +103,7 @@ export default function Analytics() {
       }
 
       // Fetch validation data independently — failures don't block the page
-      try {
-        const [sumRes, cmRes, calRes, thrRes] = await Promise.allSettled([
-          getValidationSummary(),
-          getConfusionMatrix(),
-          getCalibration(),
-          getThresholdAnalysis(),
-        ]);
-        if (sumRes.status === 'fulfilled') setValSummary(sumRes.value.data);
-        if (cmRes.status  === 'fulfilled') setConfMatrix(cmRes.value.data);
-        if (calRes.status === 'fulfilled') setCalibration(calRes.value.data);
-        if (thrRes.status === 'fulfilled') setThresholds(thrRes.value.data);
-      } catch (e) {
-        // Validation data unavailable — page continues without it
-      }
+      await fetchValidationData();
     }
     fetchData();
   }, []);
@@ -157,10 +205,47 @@ export default function Analytics() {
 
         {/* Validation Summary */}
         <div className="card" style={{ padding: 24 }}>
-          <h3 className="card-title" style={{ fontSize: 17, marginBottom: 4 }}>Model Validation & Ground Truth</h3>
-          <span className="card-subtitle" style={{ display: 'block', marginBottom: 20 }}>
-            Comparing predictions against independently derived defect evidence (SZZ). Only finalized records (not PENDING / INSUFFICIENT) are included in metrics.
-          </span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+            <div>
+              <h3 className="card-title" style={{ fontSize: 17, marginBottom: 4 }}>Model Validation & Ground Truth</h3>
+              <span className="card-subtitle" style={{ display: 'block' }}>
+                Comparing predictions against independently derived defect evidence (SZZ). Only finalized records (not PENDING / INSUFFICIENT) are included in metrics.
+              </span>
+            </div>
+            <button 
+              className="btn btn-secondary" 
+              onClick={handleRunBulkAnalysis}
+              disabled={bulkRunning}
+              style={{ fontSize: 12, padding: '6px 12px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              {bulkRunning ? (
+                <>
+                  <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                  Processing... {bulkProgress.total > 0 ? `(${bulkProgress.current}/${bulkProgress.total})` : ''}
+                </>
+              ) : 'Run Analysis on All PRs'}
+            </button>
+          </div>
+
+          {bulkRunning && (
+            <div style={{ marginBottom: 20, padding: 16, background: '#0f172a', border: '1px solid var(--border-medium)', borderRadius: 8, fontFamily: 'monospace', fontSize: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, color: 'var(--text-secondary)' }}>
+                <span>Analysis Progress</span>
+                <span>{bulkProgress.total > 0 ? Math.round((bulkProgress.current / bulkProgress.total) * 100) : 0}%</span>
+              </div>
+              <div style={{ width: '100%', height: 6, background: 'var(--bg-input)', borderRadius: 3, overflow: 'hidden', marginBottom: 12 }}>
+                <div style={{ width: `${bulkProgress.total > 0 ? (bulkProgress.current / bulkProgress.total) * 100 : 0}%`, height: '100%', background: 'var(--accent-primary)', transition: 'width 0.2s' }}></div>
+              </div>
+              <div style={{ maxHeight: 150, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, color: 'var(--text-muted)' }}>
+                {bulkLogs.map((log, i) => (
+                  <div key={i} style={{ color: log.includes('Result:') ? 'var(--risk-low)' : log.includes('Error') ? 'var(--risk-high)' : 'var(--text-muted)' }}>
+                    &gt; {log}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
             {[
               { label: 'Total PRs',             val: valSummary?.total_prs ?? '—', color: 'var(--text-primary)' },
@@ -201,6 +286,13 @@ export default function Analytics() {
               <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
                 {valSummary?.message || 'Run ground-truth analysis on historical PRs to begin model validation.'}
               </div>
+              <button 
+                 onClick={handleRunBulkAnalysis}
+                 disabled={bulkRunning}
+                 className="btn btn-primary" 
+                 style={{ marginTop: 16 }}>
+                 {bulkRunning ? 'Analyzing...' : 'Run Ground-Truth Analysis on All PRs'}
+              </button>
             </div>
           )}
         </div>
@@ -332,85 +424,7 @@ export default function Analytics() {
           )}
         </div>
 
-        {/* ═══════════════════════════════════════════════════════════ */}
-        {/* EXISTING: System Architecture & Validation Pipeline Diagram */}
-        {/* ═══════════════════════════════════════════════════════════ */}
-        <div className="card" style={{ padding: 32, background: 'var(--bg-card)' }}>
-          <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <h3 className="card-title" style={{ fontSize: 18 }}>System Architecture &amp; Validation Pipeline</h3>
-            <span className="card-subtitle">How predictions are validated against ground truth data</span>
-          </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontFamily: 'var(--font-mono)' }}>
-            
-            {/* Top Node */}
-            <div style={{ padding: '12px 24px', background: 'var(--accent-primary)', color: '#fff', borderRadius: 8, fontWeight: 700, letterSpacing: '1px' }}>
-              DEVRISK AI
-            </div>
-            
-            <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-            
-            {/* Horizontal Split */}
-            <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-              
-              {/* Left Branch */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 220 }}>
-                <div style={{ width: '100%', height: 2, background: 'var(--border-medium)', position: 'relative', left: '50%' }}></div>
-                <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-                <ArrowDown size={14} style={{ color: 'var(--text-muted)', marginTop: -6, marginBottom: 8 }} />
-                <div style={{ padding: '10px 16px', background: 'var(--bg-glass)', border: '1px solid var(--border-medium)', borderRadius: 6, fontWeight: 600, fontSize: 13, textAlign: 'center' }}>PREDICTION<br/>PIPELINE</div>
-                <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-                <ArrowDown size={14} style={{ color: 'var(--text-muted)', marginTop: -6, marginBottom: 8 }} />
-                <div style={{ padding: '8px 16px', background: 'var(--risk-high-bg)', color: 'var(--risk-high)', border: '1px solid var(--risk-high)', borderRadius: 6, fontWeight: 700, fontSize: 13 }}>Risk = 82%</div>
-                <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-                <div style={{ width: '100%', height: 2, background: 'var(--border-medium)', position: 'relative', left: '50%' }}></div>
-              </div>
-              
-              {/* Center Branch */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 220 }}>
-                <div style={{ width: '100%', height: 2, background: 'var(--border-medium)' }}></div>
-                <div style={{ width: 2, height: 24, background: 'var(--border-medium)', marginTop: -2 }}></div>
-                <ArrowDown size={14} style={{ color: 'var(--text-muted)', marginTop: -6, marginBottom: 8 }} />
-                <div style={{ padding: '10px 16px', background: 'var(--bg-glass)', border: '1px solid var(--border-medium)', borderRadius: 6, fontWeight: 600, fontSize: 13, textAlign: 'center' }}>GROUND TRUTH<br/>PIPELINE</div>
-                <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-                <ArrowDown size={14} style={{ color: 'var(--text-muted)', marginTop: -6, marginBottom: 8 }} />
-                <div style={{ padding: '8px 16px', background: 'var(--bg-input)', border: '1px solid var(--border-medium)', borderRadius: 6, fontWeight: 600, fontSize: 13 }}>SZZ / GitHub</div>
-                <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-                <div style={{ width: '100%', height: 2, background: 'var(--border-medium)', marginTop: -2 }}></div>
-              </div>
-              
-              {/* Right Branch */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 220 }}>
-                <div style={{ width: '100%', height: 2, background: 'var(--border-medium)', position: 'relative', right: '50%' }}></div>
-                <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-                <ArrowDown size={14} style={{ color: 'var(--text-muted)', marginTop: -6, marginBottom: 8 }} />
-                <div style={{ padding: '10px 16px', background: 'var(--bg-glass)', border: '1px solid var(--border-medium)', borderRadius: 6, fontWeight: 600, fontSize: 13, textAlign: 'center' }}>EXPLANATION<br/>PIPELINE</div>
-                <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-                <ArrowDown size={14} style={{ color: 'var(--text-muted)', marginTop: -6, marginBottom: 8 }} />
-                <div style={{ padding: '8px 16px', background: 'var(--bg-input)', border: '1px solid var(--border-medium)', borderRadius: 6, fontWeight: 600, fontSize: 13 }}>TreeSHAP</div>
-                <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-                <div style={{ width: '100%', height: 2, background: 'var(--border-medium)', position: 'relative', right: '50%' }}></div>
-              </div>
 
-            </div>
-            
-            {/* Recombine Node */}
-            <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-            <ArrowDown size={14} style={{ color: 'var(--text-muted)', marginTop: -6, marginBottom: 8 }} />
-            
-            <div style={{ padding: '12px 24px', background: 'var(--bg-glass)', border: '2px solid var(--accent-primary)', color: 'var(--text-primary)', borderRadius: 8, fontWeight: 700, letterSpacing: '1px' }}>
-              VALIDATION ENGINE
-            </div>
-            
-            <div style={{ width: 2, height: 24, background: 'var(--border-medium)' }}></div>
-            <ArrowDown size={14} style={{ color: 'var(--text-muted)', marginTop: -6, marginBottom: 8 }} />
-            
-            <div style={{ padding: '12px 24px', background: 'var(--risk-low-bg)', border: '1px solid var(--risk-low)', color: 'var(--risk-low)', borderRadius: 8, fontWeight: 600, fontSize: 14 }}>
-              "Was prediction correct?"
-            </div>
-
-          </div>
-        </div>
 
       </div>
     </div>

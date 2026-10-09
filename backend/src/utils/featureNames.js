@@ -7,7 +7,7 @@
 // ============================================================
 
 /**
- * Ordered list of raw feature names expected by the ML service.
+ * Ordered list of raw feature names expected bKOy the ML service.
  * MUST match the training order exactly.
  */
 const FEATURE_ORDER = [

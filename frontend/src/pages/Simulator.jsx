@@ -14,6 +14,7 @@ import RiskGauge from '../components/RiskGauge';
 import ShapCard from '../components/ShapCard';
 import FeatureTooltip from '../components/FeatureTooltip';
 import { getFeatureDef } from '../utils/featureDefinitions';
+import { Copy, Check } from 'lucide-react';
 
 const PRESETS = [
   {
@@ -85,9 +86,11 @@ export default function Simulator() {
   const [searchParams] = useSearchParams();
   const prIdFromUrl = searchParams.get('prId') || location.state?.prId;
   const [trackedPRs, setTrackedPRs] = useState([]);
-  const [selectedPRId, setSelectedPRId] = useState(prIdFromUrl || '');
+  const [filterRepoId, setFilterRepoId] = useState(sessionStorage.getItem('simulator_filter_repo_id') || '');
+  const [selectedPRId, setSelectedPRId] = useState(prIdFromUrl || sessionStorage.getItem('simulator_selected_pr_id') || '');
   const [loadingPR, setLoadingPR] = useState(false);
   const [loadPRMessage, setLoadPRMessage] = useState(null);
+  const [showScopeInfo, setShowScopeInfo] = useState(false);
 
   const debounceTimerRef = useRef(null);
 
@@ -140,7 +143,27 @@ export default function Simulator() {
     } finally {
       setLoading(false);
     }
-  }, [author, prTitle, selectedRepoId]);
+  }, [author, prTitle]); // Removed selectedRepoId from dependency so we can pass it directly if needed
+
+  // Run simulation API call wrapping
+  const triggerSimulationWithRepo = async (newRepoId) => {
+    setLoading(true);
+    try {
+      const payload = {
+        title: prTitle,
+        author,
+        features: features,
+        save_to_db: false,
+        repo_id: newRepoId ? parseInt(newRepoId, 10) : null,
+      };
+      const res = await simulatePR(payload);
+      setResult(res.data);
+    } catch (err) {
+      console.error('Simulation error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Debounced trigger for sliders
   const debouncedSimulate = useCallback((updatedFeatures, title) => {
@@ -158,21 +181,26 @@ export default function Simulator() {
     setLoadingPR(true);
     try {
       const res = await getPRDetail(prId);
-      const pr = res.data.pr || res.data;
-      if (pr) {
-        setSelectedPRId(pr.id);
-        setPrTitle(pr.title || `PR #${pr.pr_number}`);
-        setAuthor(pr.author || 'developer');
-        if (pr.repo_id) setSelectedRepoId(pr.repo_id);
+      const prResponse = res.data.pull_request || res.data.pr || res.data;
+      if (prResponse) {
+        setSelectedPRId(prResponse.id.toString());
+        sessionStorage.setItem('simulator_selected_pr_id', prResponse.id.toString());
+        setPrTitle(prResponse.title || `PR #${prResponse.pr_number}`);
+        setAuthor(prResponse.author || 'developer');
+        if (prResponse.repo_id) {
+          setSelectedRepoId(prResponse.repo_id);
+          setFilterRepoId(prResponse.repo_id.toString());
+          sessionStorage.setItem('simulator_filter_repo_id', prResponse.repo_id.toString());
+        }
 
-        const rawFeatures = pr.features?.features || pr.features || {};
+        const rawFeatures = res.data.features || prResponse.features || {};
         const extractedFeatures = {
           ns: rawFeatures.ns ?? 2,
           nd: rawFeatures.nd ?? 2,
           nf: rawFeatures.nf ?? 3,
           entropy: rawFeatures.entropy !== undefined ? Number(rawFeatures.entropy) : 0.85,
-          la: rawFeatures.la !== undefined ? Number(rawFeatures.la) : (pr.additions || 120),
-          ld: rawFeatures.ld !== undefined ? Number(rawFeatures.ld) : (pr.deletions || 30),
+          la: rawFeatures.la !== undefined ? Number(rawFeatures.la) : (prResponse.additions || 120),
+          ld: rawFeatures.ld !== undefined ? Number(rawFeatures.ld) : (prResponse.deletions || 30),
           lt: rawFeatures.lt !== undefined ? Number(rawFeatures.lt) : 450,
           fix: rawFeatures.fix !== undefined ? Number(rawFeatures.fix) : 0,
           ndev: rawFeatures.ndev !== undefined ? Number(rawFeatures.ndev) : 4,
@@ -184,8 +212,8 @@ export default function Simulator() {
         };
         setFeatures(extractedFeatures);
         setActivePreset(-1); // Switch to custom mode
-        executeSimulation(extractedFeatures, pr.title);
-        setLoadPRMessage(`✅ Loaded real Pull Request #${pr.pr_number || pr.id}: "${pr.title}"! Sliders are now populated with its live repository metrics.`);
+        executeSimulation(extractedFeatures, prResponse.title);
+        setLoadPRMessage(`✅ Loaded real Pull Request #${prResponse.pr_number || prResponse.id}: "${prResponse.title}"! Sliders are now populated with its live repository metrics.`);
         setTimeout(() => setLoadPRMessage(null), 7000);
       }
     } catch (err) {
@@ -251,31 +279,20 @@ export default function Simulator() {
 
   return (
     <>
-      <div className="page-header">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-          <div>
-            <h1 className="page-title">Playground</h1>
-            <p className="page-subtitle">
+      <div className="page-header" style={{ position: 'relative' }}>
+        <button 
+          onClick={() => navigate(-1)} 
+          className="btn btn-secondary"
+          style={{ marginBottom: 16, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-medium)', color: 'var(--text-secondary)' }}
+        >
+          <span>← Back</span>
+        </button>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <h1 className="page-title" style={{ marginTop: 0, marginBottom: 8 }}>Playground</h1>
+            <p className="page-subtitle" style={{ margin: 0 }}>
               Interactive developer sandbox to test code change risk, tune 14 metrics, and preview CI/CD gates.
             </p>
-          </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button
-              className="btn btn-secondary"
-              onClick={handleCopyMarkdown}
-              disabled={!simData}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, minWidth: 165 }}
-            >
-              {copied ? 'Copied' : 'Copy PR Comment'}
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleSaveToDb}
-              disabled={savingToDb || loading}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, minWidth: 185 }}
-            >
-              {savingToDb ? 'Saving...' : 'Save to Tracked PRs'}
-            </button>
           </div>
         </div>
       </div>
@@ -335,41 +352,83 @@ export default function Simulator() {
       }}>
         <div style={{ fontSize: 24, lineHeight: 1, marginTop: 2 }}>💡</div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-            Playground Sandbox vs. Live Pull Request Hub
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Playground Sandbox vs. Live Pull Request Hub
+            </div>
+            <button
+              onClick={() => setShowScopeInfo(!showScopeInfo)}
+              style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0 }}
+            >
+              {showScopeInfo ? 'Show less ↑' : 'Read more ↓'}
+            </button>
           </div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            DevRisk AI actively tracks and evaluates <strong>all pull requests across all your connected repositories</strong>.
-            To inspect all active PRs and their real-time ML defect verdicts, visit the{' '}
-            <Link to="/" style={{ color: 'var(--accent-primary)', fontWeight: 700, textDecoration: 'underline' }}>
-              Pull Request Dashboard →
-            </Link>.
-            <br />
-            This <strong>Playground</strong> is an interactive "what-if" developer sandbox: you can simulate counterfactual code changes on <strong>any real PR loaded below</strong> or test custom slider values before committing code to GitHub.
-          </div>
+          {showScopeInfo && (
+            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: 8 }}>
+              DevRisk AI actively tracks and evaluates <strong>all pull requests across all your connected repositories</strong>.
+              To inspect all active PRs and their real-time ML defect verdicts, visit the{' '}
+              <Link to="/" style={{ color: 'var(--accent-primary)', fontWeight: 700, textDecoration: 'underline' }}>
+                Pull Request Dashboard →
+              </Link>.
+              <br />
+              This <strong>Playground</strong> is an interactive "what-if" developer sandbox: you can simulate counterfactual code changes on <strong>any real PR loaded below</strong> or test custom slider values before committing code to GitHub.
+            </div>
+          )}
         </div>
       </div>
 
       {/* Real Tracked PR Loader Card */}
       <div className="card animate-in" style={{
-        marginBottom: 20,
-        padding: '18px 20px',
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border-medium)',
+        marginBottom: 24,
+        padding: '22px 24px',
+        background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(34, 211, 238, 0.02) 100%)',
+        border: '1px solid rgba(16, 185, 129, 0.3)',
+        borderLeft: '4px solid #10b981',
+        boxShadow: '0 8px 32px -8px rgba(16, 185, 129, 0.15)',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 18 }}>📂</span>
+        <div style={{
+          position: 'absolute', top: '-50%', left: '-5%', width: '250px', height: '250px',
+          background: 'radial-gradient(circle, rgba(16,185,129,0.15) 0%, rgba(0,0,0,0) 70%)',
+          borderRadius: '50%', pointerEvents: 'none'
+        }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 20, position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ 
+              background: 'rgba(16, 185, 129, 0.15)', 
+              color: '#10b981', 
+              padding: '10px', 
+              borderRadius: '12px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              boxShadow: '0 0 15px rgba(16, 185, 129, 0.2)'
+            }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </div>
             <div>
-              <strong style={{ fontSize: 14, color: 'var(--text-primary)' }}>
-                Load Any Real Tracked Pull Request into Simulator
-              </strong>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                Select any PR from your connected repositories to populate the sliders with its live metrics
+              <h2 style={{ fontSize: 16, fontWeight: 700, color: '#10b981', margin: 0, letterSpacing: '0.2px' }}>
+                Load Real Tracked Pull Request
+              </h2>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
+                Select any PR from your connected repositories to instantly populate the Simulator with its live metrics
               </div>
             </div>
           </div>
-          <span className="badge badge-low" style={{ fontSize: 11, padding: '3px 10px' }}>
+          <span style={{ 
+            fontSize: 11.5, 
+            padding: '5px 12px', 
+            background: 'rgba(16, 185, 129, 0.15)', 
+            color: '#10b981',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            borderRadius: '20px',
+            fontWeight: 600
+          }}>
             {trackedPRs.length} Tracked PRs Ready
           </span>
         </div>
@@ -378,33 +437,56 @@ export default function Simulator() {
           <select
             className="input-field"
             style={{ flex: 1, minWidth: 280, cursor: 'pointer', fontSize: 13 }}
+            value={filterRepoId}
+            onChange={(e) => {
+              const val = e.target.value;
+              setFilterRepoId(val);
+              sessionStorage.setItem('simulator_filter_repo_id', val);
+              setSelectedPRId(''); // reset PR selection on repo change
+              sessionStorage.removeItem('simulator_selected_pr_id');
+            }}
+            disabled={loadingPR}
+          >
+            <option value="">-- First: Select a Repository --</option>
+            {repos.map(r => (
+              <option key={r.id} value={r.id}>{r.owner}/{r.name}</option>
+            ))}
+          </select>
+
+          <select
+            className="input-field"
+            style={{ flex: 1, minWidth: 280, cursor: filterRepoId ? 'pointer' : 'not-allowed', fontSize: 13, opacity: filterRepoId ? 1 : 0.6 }}
             value={selectedPRId}
             onChange={(e) => {
               const id = e.target.value;
               setSelectedPRId(id);
-              if (id) loadSpecificPR(id);
+              if (id) {
+                sessionStorage.setItem('simulator_selected_pr_id', id);
+                loadSpecificPR(id);
+              } else {
+                sessionStorage.removeItem('simulator_selected_pr_id');
+              }
             }}
-            disabled={loadingPR}
+            disabled={loadingPR || !filterRepoId}
           >
-            <option value="">-- Choose any real PR to load into sliders ({trackedPRs.length} PRs available) --</option>
-            {trackedPRs.map((pr) => (
+            <option value="">{filterRepoId ? "-- Second: Choose a PR to load --" : "-- Please select a repository first --"}</option>
+            {trackedPRs.filter(pr => pr.repo_id == filterRepoId).map((pr) => (
               <option key={pr.id} value={pr.id}>
-                #{pr.pr_number || pr.id} — {pr.title} [{pr.repo_name || 'repo'}] • {pr.risk_label || 'REVIEW'} ({Math.round(pr.risk_score || 0)}% risk)
+                #{pr.pr_number || pr.id} — {pr.title} • {pr.risk_label || 'REVIEW'} ({Math.round(pr.risk_score || 0)}% risk)
               </option>
             ))}
           </select>
 
-          {selectedPRId && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => navigate(`/prs/${selectedPRId}`)}
-              style={{ fontSize: 12, padding: '9px 16px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            >
-              <span>View Full PR Analysis</span>
-              <span>↗</span>
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => navigate(`/prs/${selectedPRId}`)}
+            style={{ fontSize: 12, padding: '9px 16px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6, opacity: selectedPRId ? 1 : 0.5, cursor: selectedPRId ? 'pointer' : 'not-allowed' }}
+            disabled={!selectedPRId}
+          >
+            <span>View Full PR Analysis</span>
+            <span>↗</span>
+          </button>
         </div>
 
         {loadPRMessage && (
@@ -423,18 +505,17 @@ export default function Simulator() {
         )}
       </div>
 
-      {/* Preset Selector */}
+      {/* Configuration Section: Presets & Target Config */}
       <div className="card animate-in" style={{ marginBottom: 24 }}>
         <div className="card-header" style={{ marginBottom: 12 }}>
           <h3 className="card-title">Quick Preset Scenarios</h3>
           <span className="card-subtitle">Select a scenario or adjust the sliders below for custom changes</span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
           {PRESETS.map((preset, idx) => (
-            <button
+            <label
               key={idx}
               className={`preset-btn ${activePreset === idx ? 'active' : ''}`}
-              onClick={() => handlePresetSelect(idx)}
               style={{
                 background: activePreset === idx ? 'var(--bg-card-hover)' : 'var(--bg-page)',
                 border: activePreset === idx ? '2px solid var(--accent-purple)' : '1px solid var(--border-color)',
@@ -443,23 +524,34 @@ export default function Simulator() {
                 textAlign: 'left',
                 cursor: 'pointer',
                 transition: 'all var(--transition-fast)',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '12px',
+                margin: 0
               }}
             >
-              <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4, fontSize: 13 }}>
-                {preset.name}
+              <div style={{ marginTop: '2px', flexShrink: 0 }}>
+                <input 
+                  type="radio" 
+                  name="preset-selection"
+                  checked={activePreset === idx} 
+                  onChange={() => handlePresetSelect(idx)}
+                  style={{ cursor: 'pointer', margin: 0 }}
+                />
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                {preset.title}
+              <div>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13, lineHeight: 1.4, whiteSpace: 'normal', overflowWrap: 'break-word' }}>
+                  {preset.name}
+                </div>
               </div>
-            </button>
+            </label>
           ))}
         </div>
-      </div>
 
-      {/* Target Repo & Title Config */}
-      <div className="card animate-in" style={{ marginBottom: 24 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
-          <div>
+        <div style={{ height: 1, background: 'var(--border-medium)', margin: '0 -20px 24px -20px' }}></div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
+          <div style={{ flex: '1 1 200px' }}>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
               PR Title
             </label>
@@ -475,7 +567,29 @@ export default function Simulator() {
             />
           </div>
 
-          <div>
+          {repos.length > 0 && (
+            <div style={{ flex: '1 1 200px' }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                Target Tracked Repository (For Saving)
+              </label>
+              <select
+                className="input-field"
+                value={selectedRepoId}
+                onChange={(e) => {
+                  setSelectedRepoId(e.target.value);
+                  triggerSimulationWithRepo(e.target.value);
+                }}
+              >
+                {repos.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.owner}/{r.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div style={{ flex: '1 1 200px' }}>
             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
               Author Name
             </label>
@@ -488,24 +602,31 @@ export default function Simulator() {
             />
           </div>
 
-          {repos.length > 0 && (
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-                Target Tracked Repository
-              </label>
-              <select
-                className="input-field"
-                value={selectedRepoId}
-                onChange={(e) => setSelectedRepoId(e.target.value)}
-              >
-                {repos.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.owner}/{r.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div style={{ flex: '1 1 200px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 8 }}>
+            <button
+              className="btn"
+              onClick={handleCopyMarkdown}
+              disabled={!simData}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, width: '100%', padding: '6px 10px',
+                background: copied ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-glass)',
+                border: copied ? '1px solid var(--risk-low)' : '1px solid var(--border-medium)',
+                color: copied ? 'var(--risk-low)' : 'var(--text-primary)',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? 'Copied!' : 'Copy PR Comment'}
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleSaveToDb}
+              disabled={savingToDb || loading}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, width: '100%', padding: '6px 10px' }}
+            >
+              {savingToDb ? 'Saving...' : 'Save to Tracked PRs'}
+            </button>
+          </div>
         </div>
       </div>
 

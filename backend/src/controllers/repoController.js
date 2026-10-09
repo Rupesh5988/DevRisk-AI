@@ -230,4 +230,29 @@ async function syncRepo(req, res) {
   }
 }
 
-module.exports = { listRepos, addRepo, getRepoById, syncRepo };
+/**
+ * DELETE /api/repos/:id
+ *
+ * Deletes a tracked repository.
+ */
+async function deleteRepo(req, res) {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      'DELETE FROM repositories WHERE id = $1 AND user_id = $2 RETURNING *',
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Repository not found' });
+    }
+
+    res.json({ message: 'Repository deleted successfully' });
+  } catch (err) {
+    console.error('[RepoController] Error deleting repo:', err.message);
+    res.status(500).json({ error: 'Internal server error during deletion' });
+  }
+}
+
+module.exports = { listRepos, addRepo, getRepoById, syncRepo, deleteRepo };

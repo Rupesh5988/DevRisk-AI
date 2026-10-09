@@ -156,9 +156,9 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
             <button
               className="btn btn-secondary"
               style={{ padding: '7px 14px', fontSize: 13 }}
-              onClick={() => navigate('/')}
+              onClick={() => navigate(-1)}
             >
-              ← Back to Dashboard
+              ← Back
             </button>
             <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
               {pr.repo_owner || 'repo'}/{pr.repo_name || 'project'}

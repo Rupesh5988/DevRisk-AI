@@ -21,8 +21,7 @@ import Settings from './pages/Settings';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Landing from './pages/Landing';
-import Info from './pages/Info';
-
+import ProjectInfoWidget from './components/ProjectInfoWidget';
 // Protected route wrapper — redirects to login if not authenticated
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -83,7 +82,6 @@ function AppRoutes() {
       <Route path="/graph" element={<ProtectedRoute><DependencyGraphPage /></ProtectedRoute>} />
       <Route path="/review-queue" element={<ProtectedRoute><ReviewQueue /></ProtectedRoute>} />
       <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
-      <Route path="/info" element={<ProtectedRoute><Info /></ProtectedRoute>} />
       <Route path="/metrics-dictionary" element={<ProtectedRoute><MetricsDictionary /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
 
@@ -106,6 +104,7 @@ function AppLayout() {
         />
       )}
       {isAuthenticated && <UserDropdown />}
+      {isAuthenticated && <ProjectInfoWidget />}
       <main className={isAuthenticated ? "main-content" : "full-page-content"}>
         <AppRoutes />
       </main>
@@ -115,7 +114,7 @@ function AppLayout() {
 
 export default function App() {
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ThemeProvider>
         <AuthProvider>
           <AppLayout />

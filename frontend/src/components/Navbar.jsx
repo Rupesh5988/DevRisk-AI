@@ -102,22 +102,6 @@ export default function Navbar({ isCollapsed, onToggle }) {
             {!isCollapsed && <span className="sidebar-tag">28</span>}
           </NavLink>
         </li>
-        <li>
-          <NavLink
-            to="/info"
-            className={({ isActive }) =>
-              `sidebar-link ${isActive ? 'active' : ''}`
-            }
-            title={isCollapsed ? 'Project Info' : undefined}
-          >
-            <span className="sidebar-icon" style={{ background: 'var(--accent-primary)', color: '#fff', borderRadius: '6px', width: '28px', height: '28px', marginRight: isCollapsed ? 0 : '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-              </div>
-            </span>
-            {!isCollapsed && <span className="sidebar-label">Project Info</span>}
-          </NavLink>
-        </li>
       </ul>
     </nav>
   );

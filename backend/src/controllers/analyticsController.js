@@ -21,31 +21,43 @@ const { pool } = require('../config/database');
 async function getOverview(req, res) {
   try {
     // Total PRs
-    const totalResult = await pool.query('SELECT COUNT(*) AS total FROM pull_requests');
+    const totalResult = await pool.query(`
+      SELECT COUNT(*) AS total 
+      FROM pull_requests pr
+      JOIN repositories r ON pr.repo_id = r.id
+      WHERE r.user_id = $1
+    `, [req.user.id]);
     const totalPRs = parseInt(totalResult.rows[0].total, 10);
 
     // Average risk score (exclude -1 which means ML service was unavailable)
-    const avgResult = await pool.query(
-      'SELECT COALESCE(ROUND(AVG(risk_score)::numeric, 1), 0) AS avg_score FROM pull_requests WHERE risk_score >= 0'
-    );
+    const avgResult = await pool.query(`
+      SELECT COALESCE(ROUND(AVG(risk_score)::numeric, 1), 0) AS avg_score 
+      FROM pull_requests pr
+      JOIN repositories r ON pr.repo_id = r.id
+      WHERE risk_score >= 0 AND r.user_id = $1
+    `, [req.user.id]);
     const avgRiskScore = parseFloat(avgResult.rows[0].avg_score);
 
     // Risk distribution
     const distResult = await pool.query(`
-      SELECT risk_label, COUNT(*) AS count
-      FROM pull_requests
-      WHERE risk_label IS NOT NULL
-      GROUP BY risk_label
-    `);
+      SELECT pr.risk_label, COUNT(*) AS count
+      FROM pull_requests pr
+      JOIN repositories r ON pr.repo_id = r.id
+      WHERE pr.risk_label IS NOT NULL AND r.user_id = $1
+      GROUP BY pr.risk_label
+    `, [req.user.id]);
     const distribution = { LOW: 0, MEDIUM: 0, HIGH: 0 };
     for (const row of distResult.rows) {
       distribution[row.risk_label] = parseInt(row.count, 10);
     }
 
     // PRs analyzed today
-    const todayResult = await pool.query(
-      "SELECT COUNT(*) AS count FROM pull_requests WHERE created_at::date = CURRENT_DATE"
-    );
+    const todayResult = await pool.query(`
+      SELECT COUNT(*) AS count 
+      FROM pull_requests pr
+      JOIN repositories r ON pr.repo_id = r.id
+      WHERE pr.created_at::date = CURRENT_DATE AND r.user_id = $1
+    `, [req.user.id]);
     const todayCount = parseInt(todayResult.rows[0].count, 10);
 
     // Top 5 riskiest PRs (recent)
@@ -54,10 +66,10 @@ async function getOverview(req, res) {
              r.name AS repo_name, r.owner AS repo_owner
       FROM pull_requests pr
       JOIN repositories r ON pr.repo_id = r.id
-      WHERE pr.risk_score >= 0
+      WHERE pr.risk_score >= 0 AND r.user_id = $1
       ORDER BY pr.risk_score DESC
       LIMIT 5
-    `);
+    `, [req.user.id]);
 
     // Most recent PRs
     const recentResult = await pool.query(`
@@ -69,12 +81,16 @@ async function getOverview(req, res) {
       JOIN repositories r ON pr.repo_id = r.id
       LEFT JOIN ground_truth_records gtr ON gtr.pr_id = pr.id
       LEFT JOIN prediction_evaluations pe ON pe.pr_id = pr.id
+      WHERE r.user_id = $1
       ORDER BY pr.created_at DESC
       LIMIT 10
-    `);
+    `, [req.user.id]);
 
     // Repositories count
-    const repoCountResult = await pool.query('SELECT COUNT(*) AS total FROM repositories');
+    const repoCountResult = await pool.query(
+      'SELECT COUNT(*) AS total FROM repositories WHERE user_id = $1',
+      [req.user.id]
+    );
     const totalRepos = parseInt(repoCountResult.rows[0].total, 10) || 0;
 
     res.json({
@@ -89,7 +105,8 @@ async function getOverview(req, res) {
       recent_prs: recentResult.rows,
     });
   } catch (err) {
-    console.error('[AnalyticsController] Error fetching overview:', err.message);
+    require('fs').writeFileSync('crash.log', err.stack);
+    console.error('[AnalyticsController] Error fetching overview:', err.stack);
     res.status(500).json({ error: 'Internal server error' });
   }
 }
@@ -111,26 +128,28 @@ async function getTrends(req, res) {
   try {
     let query = `
       SELECT
-        created_at::date AS date,
+        pr.created_at::date AS date,
         COUNT(*) AS pr_count,
-        ROUND(AVG(risk_score)::numeric, 1) AS avg_risk,
-        MAX(risk_score) AS max_risk,
-        MIN(risk_score) AS min_risk,
-        COUNT(CASE WHEN risk_label = 'HIGH' THEN 1 END) AS high_count,
-        COUNT(CASE WHEN risk_label = 'MEDIUM' THEN 1 END) AS medium_count,
-        COUNT(CASE WHEN risk_label = 'LOW' THEN 1 END) AS low_count
-      FROM pull_requests
-      WHERE created_at >= NOW() - INTERVAL '${days} days'
-        AND risk_score >= 0
+        ROUND(AVG(pr.risk_score)::numeric, 1) AS avg_risk,
+        MAX(pr.risk_score) AS max_risk,
+        MIN(pr.risk_score) AS min_risk,
+        COUNT(CASE WHEN pr.risk_label = 'HIGH' THEN 1 END) AS high_count,
+        COUNT(CASE WHEN pr.risk_label = 'MEDIUM' THEN 1 END) AS medium_count,
+        COUNT(CASE WHEN pr.risk_label = 'LOW' THEN 1 END) AS low_count
+      FROM pull_requests pr
+      JOIN repositories r ON pr.repo_id = r.id
+      WHERE pr.created_at >= NOW() - INTERVAL '${days} days'
+        AND pr.risk_score >= 0
+        AND r.user_id = $1
     `;
 
-    const params = [];
+    const params = [req.user.id];
     if (repoId) {
-      query += ' AND repo_id = $1';
+      query += ' AND pr.repo_id = $2';
       params.push(repoId);
     }
 
-    query += ' GROUP BY created_at::date ORDER BY date ASC';
+    query += ' GROUP BY pr.created_at::date ORDER BY date ASC';
 
     const result = await pool.query(query, params);
 

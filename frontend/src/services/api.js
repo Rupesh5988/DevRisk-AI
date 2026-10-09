@@ -6,7 +6,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 15000,
+  timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -49,6 +49,7 @@ export const listRepos = () => api.get('/repos');
 export const addRepo = (githubUrl) => api.post('/repos', { github_url: githubUrl });
 export const getRepo = (id) => api.get(`/repos/${id}`);
 export const syncRepoPRs = (id) => api.post(`/repos/${id}/sync`);
+export const deleteRepo = (id) => api.delete(`/repos/${id}`);
 
 // ---- Pull Requests ----
 export const getPRsByRepo = (repoId, page = 1, limit = 20, riskLabel = null) => {
