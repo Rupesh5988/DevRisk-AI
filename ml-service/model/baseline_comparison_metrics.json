@@ -1,0 +1,58 @@
+{
+  "churn_only": {
+    "name": "Churn-Only (la + ld)",
+    "auc_roc": 0.7772,
+    "auc_roc_95ci": [
+      0.7696,
+      0.7853
+    ],
+    "pr_auc": 0.4038,
+    "brier_score": 0.1406,
+    "bss_vs_train_prior": 0.0799,
+    "bss_vs_test_prior": -0.0277
+  },
+  "logistic_regression": {
+    "name": "Standard Logistic Regression",
+    "auc_roc": 0.8494,
+    "auc_roc_95ci": [
+      0.8423,
+      0.8562
+    ],
+    "pr_auc": 0.5848,
+    "brier_score": 0.1146,
+    "bss_vs_train_prior": 0.2501,
+    "bss_vs_test_prior": 0.1624
+  },
+  "calibrated_ensemble": {
+    "name": "DevRisk Calibrated Ensemble (XGB+RF)",
+    "auc_roc": 0.8665,
+    "auc_roc_95ci": [
+      0.8597,
+      0.8729
+    ],
+    "pr_auc": 0.6613,
+    "brier_score": 0.1156,
+    "bss_vs_train_prior": 0.2433,
+    "bss_vs_test_prior": 0.1548
+  },
+  "paired_bootstrap_tests": {
+    "ensemble_vs_churn": {
+      "delta_auc": 0.0891,
+      "delta_auc_95ci": [
+        0.0826,
+        0.0955
+      ],
+      "p_value_display": "< 0.002",
+      "p_value_raw": 0.0
+    },
+    "ensemble_vs_logistic_regression": {
+      "delta_auc": 0.0171,
+      "delta_auc_95ci": [
+        0.0143,
+        0.0199
+      ],
+      "p_value_display": "< 0.002",
+      "p_value_raw": 0.0
+    }
+  }
+}

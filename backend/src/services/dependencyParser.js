@@ -115,7 +115,7 @@ function extractImports(content) {
  * @param {string} ref       - Git ref (branch/SHA) to fetch file content from
  * @returns {Object} { nodes: string[], edges: { source: string, target: string }[] }
  */
-async function buildDependencyGraph(owner, repo, prFiles, ref) {
+async function buildDependencyGraph(owner, repo, prFiles, ref, userToken = null) {
   const nodes = new Set();
   const edges = [];
 
@@ -136,8 +136,8 @@ async function buildDependencyGraph(owner, repo, prFiles, ref) {
     // Skip deleted files — they have no content to parse
     if (file.status === 'removed') continue;
 
-    // Fetch the file content from GitHub
-    const content = await githubService.getFileContent(owner, repo, filename, ref);
+    // Fetch the file content from GitHub using token if provided
+    const content = await githubService.getFileContent(owner, repo, filename, ref, userToken);
     if (!content) continue;
 
     // Extract import/require statements

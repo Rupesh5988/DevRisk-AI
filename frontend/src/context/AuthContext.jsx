@@ -46,6 +46,12 @@ export function AuthProvider({ children }) {
     setUser(userData);
   }
 
+  function updateUser(userData) {
+    const updated = { ...user, ...userData };
+    localStorage.setItem('devrisk_user', JSON.stringify(updated));
+    setUser(updated);
+  }
+
   function logout() {
     localStorage.removeItem('devrisk_token');
     localStorage.removeItem('devrisk_user');
@@ -53,7 +59,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, updateUser, isAuthenticated: !!user }}>
       {children}
     </AuthContext.Provider>
   );

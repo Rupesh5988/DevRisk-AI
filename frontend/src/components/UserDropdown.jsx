@@ -96,7 +96,7 @@ export default function UserDropdown() {
               <div className="user-dropdown-name">{user.full_name || user.username}</div>
               <div className="user-dropdown-email">{user.email || 'developer@devrisk.ai'}</div>
               <span className="user-dropdown-role-badge">
-                {user.role || 'Admin'}
+                {localStorage.getItem('devrisk_role') || user.role || 'Developer'}
               </span>
             </div>
           </div>

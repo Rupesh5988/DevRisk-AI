@@ -196,9 +196,7 @@ class DevRiskPipeline:
         self.df = df
         buggy_count = int(self.df[LABEL_COLUMN].sum())
         clean_count = len(self.df) - buggy_count
-        self.scale_pos_weight = clean_count / max(buggy_count, 1)
         print(f"    Defect Distribution: {buggy_count:,} buggy ({buggy_count/len(df)*100:.1f}%) | {clean_count:,} clean")
-        print(f"    scale_pos_weight: {self.scale_pos_weight:.2f}")
 
     def split_data(self):
         print("\n[2] Splitting Data (80% Train, 20% Future Test)...")
@@ -214,8 +212,14 @@ class DevRiskPipeline:
         X_train, X_test = X[:split_idx], X[split_idx:]
         y_train, y_test = y[:split_idx], y[split_idx:]
 
+        # Compute scale_pos_weight strictly on the training fold (zero test leakage)
+        train_buggy = int(y_train.sum())
+        train_clean = len(y_train) - train_buggy
+        self.scale_pos_weight = train_clean / max(train_buggy, 1)
+
         print(f"    Train Fold (Historical): {len(X_train):,} samples (Defect rate: {y_train.mean()*100:.1f}%)")
         print(f"    Test Fold (Unseen Future): {len(X_test):,} samples (Defect rate: {y_test.mean()*100:.1f}%)")
+        print(f"    scale_pos_weight (fit strictly on train fold): {self.scale_pos_weight:.2f}")
         return X_train, X_test, y_train, y_test
 
     def build_xgb_classifier(self):
@@ -296,13 +300,24 @@ class DevRiskPipeline:
         print("    ✅ Calibrated Soft-Voting Ensemble (XGBoost + Random Forest) successfully trained and calibrated.")
 
     def optimize_threshold(self, X_train, y_train):
-        print("\n[5] Cost-Sensitive & F1-Optimal Threshold Optimization (FN=5.0x, FP=1.0x)...")
-        # Evaluate on the final 15% temporal slice of the training set
+        print("\n[5] Threshold Optimization: Constrained F1-Optimal (Held-out Val Recall >= 70%)...")
+        # Split historical train into 85% train sub-fold and 15% out-of-sample validation slice
         val_slice_idx = int(len(X_train) * 0.85)
+        X_tr_sub, y_tr_sub = X_train[:val_slice_idx], y_train[:val_slice_idx]
         X_val, y_val = X_train[val_slice_idx:], y_train[val_slice_idx:]
-        val_probs = self.calibrated_model.predict_proba(X_val)[:, 1]
 
-        best_threshold = 0.46
+        # Train a sub-fold calibrated ensemble strictly on the earlier 85% to ensure out-of-sample validation probabilities
+        secondary_clf = self.build_secondary_classifier()
+        sub_ensemble = VotingClassifier(
+            estimators=[('xgb', self.build_xgb_classifier()), ('rf', secondary_clf)],
+            voting='soft',
+            weights=[1.2, 1.0]
+        )
+        val_calibrated = CalibratedClassifierCV(estimator=sub_ensemble, method='sigmoid', cv=3)
+        val_calibrated.fit(X_tr_sub, y_tr_sub)
+        val_probs = val_calibrated.predict_proba(X_val)[:, 1]
+
+        best_threshold = 0.48
         best_f1 = 0.0
         min_cost = float("inf")
 
@@ -313,10 +328,22 @@ class DevRiskPipeline:
             if rec >= 0.70 and f1 > best_f1:
                 best_f1 = f1
                 best_threshold = float(thresh)
-                tn, fp, fn, tp = confusion_matrix(y_val, preds).ravel()
-                min_cost = (COST_FN * fn) + (COST_FP * fp)
 
-        print(f"    Optimal Decision Threshold: {best_threshold:.2f} (Val F1: {best_f1:.4f}, Val Recall >= 70%)")
+        if best_f1 == 0.0:
+            print("    ⚠️ [WARNING] No cutoff in [0.25, 0.65] achieved validation recall >= 0.70. Falling back to unconstrained max F1.")
+            for thresh in np.arange(0.25, 0.65, 0.01):
+                preds = (val_probs >= thresh).astype(int)
+                f1 = f1_score(y_val, preds)
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best_threshold = float(thresh)
+
+        # Compute cost for the chosen threshold on the validation slice
+        preds_chosen = (val_probs >= best_threshold).astype(int)
+        tn_val, fp_val, fn_val, tp_val = confusion_matrix(y_val, preds_chosen).ravel()
+        min_cost = (COST_FN * fn_val) + (COST_FP * fp_val)
+
+        print(f"    Optimal Decision Threshold: {best_threshold:.2f} (Held-out Val F1: {best_f1:.4f}, Val Recall >= 70%)")
         return best_threshold, min_cost
 
     def evaluate(self, X_test, y_test, threshold):

@@ -83,7 +83,7 @@ async function getOverview(req, res) {
       LEFT JOIN prediction_evaluations pe ON pe.pr_id = pr.id
       WHERE r.user_id = $1
       ORDER BY pr.created_at DESC
-      LIMIT 10
+      LIMIT 100
     `, [req.user.id]);
 
     // Repositories count

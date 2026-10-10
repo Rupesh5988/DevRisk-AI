@@ -1,12 +1,13 @@
 const bcrypt = require('bcryptjs');
 const { Client } = require('pg');
 
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 const client = new Client({
-  user: 'postgres',
-  password: 'mayur',
-  database: 'devrisk_ai',
-  host: 'localhost',
-  port: 5432
+  user: process.env.PG_USER || 'postgres',
+  password: process.env.PG_PASSWORD || '',
+  database: process.env.PG_DATABASE || 'devrisk_ai',
+  host: process.env.PG_HOST || 'localhost',
+  port: parseInt(process.env.PG_PORT, 10) || 5432
 });
 
 async function updatePass() {

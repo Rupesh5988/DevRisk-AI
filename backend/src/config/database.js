@@ -55,9 +55,15 @@ async function initializeTables() {
         name        VARCHAR(200) NOT NULL,
         owner       VARCHAR(200) NOT NULL,
         language    VARCHAR(50),
+        access_token VARCHAR(500),
         created_at  TIMESTAMP DEFAULT NOW(),
         UNIQUE(user_id, github_url)
       );
+    `);
+
+    // Ensure access_token column exists if table was already created earlier
+    await client.query(`
+      ALTER TABLE repositories ADD COLUMN IF NOT EXISTS access_token VARCHAR(500);
     `);
 
     // 2. Pull Requests table

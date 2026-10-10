@@ -94,18 +94,29 @@ async function processPullRequest(payload, targetRepoId = null) {
     console.log(`[Webhook] New repository registered: ${owner}/${repo}`);
   }
 
+  // Determine repository token (from repository's access_token or global GITHUB_TOKEN)
+  const repoToken = repoRows[0]?.access_token || process.env.GITHUB_TOKEN || null;
+
   // -------------------------------------------------------
   // Step 2b: Fetch PR details and files from GitHub API
   // -------------------------------------------------------
-  const prDetails = await githubService.getPRDetails(owner, repo, prNumber);
-  const prFiles = await githubService.getPRFiles(owner, repo, prNumber);
+  let prDetails = null;
+  let prFiles = [];
 
-  console.log(`[Webhook] PR #${prNumber}: ${prFiles.length} files changed, +${pr.additions}/-${pr.deletions}`);
+  if (pr.is_from_commit) {
+    prDetails = pr;
+    prFiles = pr.files || [];
+  } else {
+    prDetails = await githubService.getPRDetails(owner, repo, prNumber, repoToken);
+    prFiles = await githubService.getPRFiles(owner, repo, prNumber, prDetails, repoToken);
+  }
+
+  console.log(`[Webhook] PR #${prNumber}: ${prFiles.length} files changed, +${pr.additions || prDetails.additions || 0}/-${pr.deletions || prDetails.deletions || 0}`);
 
   // -------------------------------------------------------
   // Step 2c: Extract the 14 change-pattern features
   // -------------------------------------------------------
-  const features = await extractFeatures(owner, repo, prNumber, prDetails, prFiles);
+  const features = await extractFeatures(owner, repo, prNumber, prDetails, prFiles, repoToken);
 
   // -------------------------------------------------------
   // Step 2d: Parse dependency graph (JS/Node.js repos only)
@@ -115,7 +126,7 @@ async function processPullRequest(payload, targetRepoId = null) {
 
   if (hasJSFiles) {
     const ref = pr.head ? pr.head.sha : undefined;
-    dependencyGraph = await buildDependencyGraph(owner, repo, prFiles, ref);
+    dependencyGraph = await buildDependencyGraph(owner, repo, prFiles, ref, repoToken);
   }
 
   // -------------------------------------------------------

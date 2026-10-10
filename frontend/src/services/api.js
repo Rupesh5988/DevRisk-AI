@@ -40,28 +40,37 @@ api.interceptors.response.use(
 export const registerUser = (data) => api.post('/auth/register', data);
 export const loginUser = (data) => api.post('/auth/login', data);
 export const getMe = () => api.get('/auth/me');
+export const updateProfile = (data) => api.put('/auth/profile', data);
+export const changePassword = (data) => api.put('/auth/password', data);
 
 // ---- Health ----
 export const getHealth = () => api.get('/health');
 
 // ---- Repositories ----
 export const listRepos = () => api.get('/repos');
-export const addRepo = (githubUrl) => api.post('/repos', { github_url: githubUrl });
+export const checkRepoVisibility = (githubUrl, accessToken = null) =>
+  api.post('/repos/check-visibility', { github_url: githubUrl, access_token: accessToken });
+export const addRepo = (githubUrl, accessToken = null) =>
+  api.post('/repos', { github_url: githubUrl, access_token: accessToken });
 export const getRepo = (id) => api.get(`/repos/${id}`);
-export const syncRepoPRs = (id) => api.post(`/repos/${id}/sync`);
+export const updateRepoToken = (id, accessToken) =>
+  api.put(`/repos/${id}/token`, { access_token: accessToken });
+export const syncRepoPRs = (id, accessToken = null) =>
+  api.post(`/repos/${id}/sync`, { access_token: accessToken });
 export const deleteRepo = (id) => api.delete(`/repos/${id}`);
 
 // ---- Pull Requests ----
-export const getPRsByRepo = (repoId, page = 1, limit = 20, riskLabel = null) => {
+export const getPRsByRepo = (repoId, page = 1, limit = 100, riskLabel = null) => {
   const params = { page, limit };
   if (riskLabel) params.risk_label = riskLabel;
   return api.get(`/repos/${repoId}/prs`, { params });
 };
 
-export const listAllPRs = (page = 1, limit = 20, riskLabel = null, search = null) => {
+export const listAllPRs = (page = 1, limit = 1000, riskLabel = null, search = null, repoId = null) => {
   const params = { page, limit };
-  if (riskLabel) params.risk_label = riskLabel;
+  if (riskLabel && riskLabel !== 'ALL') params.risk_label = riskLabel;
   if (search) params.search = search;
+  if (repoId && repoId !== 'ALL') params.repo_id = repoId;
   return api.get('/prs', { params });
 };
 
@@ -79,7 +88,9 @@ export const getTrends = (days = 30, repoId = null) => {
 // ---- Ground Truth & Model Validation ----
 export const getGroundTruthByPR    = (prId)          => api.get(`/ground-truth/pr/${prId}`);
 export const analyzeGroundTruth    = (prId)          => api.post(`/ground-truth/analyze/${prId}`);
+export const analyzeAllGroundTruth = ()              => api.post('/ground-truth/analyze-all');
 export const getGroundTruthByRepo  = (repoId)        => api.get(`/ground-truth/repository/${repoId}`);
+export const getBenchmarkMetrics    = ()              => api.get('/model-validation/benchmark-metrics');
 export const getValidationSummary  = ()              => api.get('/model-validation/summary');
 export const getConfusionMatrix    = ()              => api.get('/model-validation/confusion-matrix');
 export const getCalibration        = ()              => api.get('/model-validation/calibration');

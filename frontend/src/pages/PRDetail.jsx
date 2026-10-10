@@ -75,36 +75,36 @@ export default function PRDetail() {
 
   const riskScore = pr.risk_score || 0;
 
-  // CI/CD Quality Gate logic (asymmetric penalty on false negatives)
+  // CI/CD Quality Gate logic
   const cicdStatus =
     riskScore >= 70
       ? {
           status: 'MERGE_BLOCKED',
-          label: 'CI/CD Quality Gate Blocked',
+          label: 'Merge Blocked — High Defect Risk',
           color: 'var(--risk-high)',
           bg: 'rgba(239, 68, 68, 0.12)',
           border: 'rgba(239, 68, 68, 0.4)',
           icon: '🛑',
-          reason: 'Defect risk exceeds 70% threshold. High likelihood of production escape. Manual senior review and refactoring required.',
+          reason: 'Defect risk exceeds 70% safety threshold. Requires senior code review approval and passing test suite verification before merge.',
         }
       : riskScore >= 40
       ? {
           status: 'MANUAL_REVIEW_REQUIRED',
-          label: 'Peer Code Review Required',
+          label: 'Peer Review Required',
           color: 'var(--risk-medium)',
           bg: 'rgba(234, 179, 8, 0.12)',
           border: 'rgba(234, 179, 8, 0.4)',
           icon: '⚠️',
-          reason: 'Moderate risk profile (40–70%). Auto-merge paused. Requires at least 1 peer approval addressing flagged risk factors.',
+          reason: 'Moderate defect risk (40%–70%). Auto-merge paused. Requires at least 1 peer approval addressing flagged risk drivers.',
         }
       : {
           status: 'MERGE_APPROVED',
-          label: 'CI/CD Quality Gate Passed',
+          label: 'Quality Gate Passed',
           color: 'var(--risk-low)',
           bg: 'rgba(34, 197, 94, 0.12)',
           border: 'rgba(34, 197, 94, 0.4)',
           icon: '✅',
-          reason: 'Low defect probability. Code change metrics satisfy repository safety benchmarks.',
+          reason: 'Low defect risk (<40%). Code modifications meet repository stability and test coverage standards.',
         };
 
   const handleCopyReviewComment = () => {
@@ -243,13 +243,13 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
         <div className="card animate-in" style={{ padding: 24, marginBottom: 28, background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
             <div>
-              <h3 className="card-title" style={{ fontSize: 17, marginBottom: 4 }}>Ground Truth Validation</h3>
+              <h3 className="card-title" style={{ fontSize: 17, marginBottom: 4 }}>Historical Outcome (Validation Harness)</h3>
               <span className="card-subtitle" style={{ display: 'block', marginBottom: 12 }}>
-                Independently verified defect status via SZZ (commit history analysis).
+                Post-merge outcome tracked via validation pipeline harness.
               </span>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
-                  <strong style={{ color: 'var(--text-muted)' }}>STATUS:</strong>
+                  <strong style={{ color: 'var(--text-muted)' }}>HISTORICAL OUTCOME:</strong>
                   <span style={{ 
                     padding: '2px 8px', borderRadius: 12, fontWeight: 700, fontSize: 11,
                     background: gtData.ground_truth_status === 'DEFECT_INDUCING' ? 'rgba(239, 68, 68, 0.15)' :
@@ -259,7 +259,9 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
                            gtData.ground_truth_status === 'NON_DEFECT_INDUCING' ? 'var(--risk-low)' :
                            'var(--text-secondary)'
                   }}>
-                    {gtData.ground_truth_status.replace(/_/g, ' ')}
+                    {gtData.ground_truth_status === 'DEFECT_INDUCING' ? 'Defect-Inducing (Caused Bug)' :
+                     gtData.ground_truth_status === 'NON_DEFECT_INDUCING' ? 'Clean / Non-Defect' :
+                     gtData.ground_truth_status.replace(/_/g, ' ')}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
@@ -268,13 +270,17 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
                 </div>
                 {gtData.evaluation_result !== 'NOT_EVALUATED' && (
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
-                    <strong style={{ color: 'var(--text-muted)' }}>PREDICTION OUTCOME:</strong>
+                    <strong style={{ color: 'var(--text-muted)' }}>MODEL ACCURACY:</strong>
                     <span style={{ 
                       padding: '2px 8px', borderRadius: 12, fontWeight: 700, fontSize: 11,
                       background: ['TRUE_POSITIVE', 'TRUE_NEGATIVE'].includes(gtData.evaluation_result) ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
                       color: ['TRUE_POSITIVE', 'TRUE_NEGATIVE'].includes(gtData.evaluation_result) ? 'var(--risk-low)' : 'var(--risk-high)'
                     }}>
-                      {gtData.evaluation_result.replace('_', ' ')}
+                      {gtData.evaluation_result === 'TRUE_POSITIVE' ? 'Accurately Flagged High Risk' :
+                       gtData.evaluation_result === 'TRUE_NEGATIVE' ? 'Accurately Cleared as Safe' :
+                       gtData.evaluation_result === 'FALSE_POSITIVE' ? 'False Alarm (Flagged High, Was Safe)' :
+                       gtData.evaluation_result === 'FALSE_NEGATIVE' ? 'Missed Defect (Flagged Low, Had Bug)' :
+                       gtData.evaluation_result.replace('_', ' ')}
                     </span>
                   </div>
                 )}
@@ -288,7 +294,7 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
               style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '7px 14px' }}
             >
               <span>{gtLoading ? '⏳' : '🔄'}</span>
-              <span>{gtLoading ? 'Analyzing...' : 'Run SZZ Analysis'}</span>
+              <span>{gtLoading ? 'Analyzing...' : 'Run Pipeline Analysis'}</span>
             </button>
           </div>
 
@@ -342,10 +348,10 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
           <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
             <div>
               <h3 className="card-title" style={{ fontSize: 17, marginBottom: 2 }}>
-                Extracted Commit Metrics & Risk Interpretations
+                Extracted Change Metrics & Risk Interpretations
               </h3>
               <span className="card-subtitle">
-                Every observed metric from this commit, its meaning, and how it impacts the risk score.
+                Observed code metrics for this pull request, evaluated against safe repository baselines.
               </span>
             </div>
             <button
@@ -361,10 +367,10 @@ ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanat
             <table className="data-table">
               <thead>
                 <tr>
-                  <th style={{ width: '25%' }}>Feature Metric</th>
+                  <th style={{ width: '22%' }}>Metric</th>
                   <th style={{ width: '13%' }}>Observed Value</th>
-                  <th style={{ width: '12%' }}>Risk Rating</th>
-                  <th style={{ width: '35%' }}>What This Value Means</th>
+                  <th style={{ width: '13%' }}>Risk Rating</th>
+                  <th style={{ width: '37%' }}>Technical Interpretation & Guidance</th>
                   <th style={{ width: '15%' }}>Safe Baseline</th>
                 </tr>
               </thead>

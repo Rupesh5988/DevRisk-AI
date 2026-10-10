@@ -127,7 +127,7 @@ async function getPRById(req, res) {
 async function getPRsByRepo(req, res) {
   const { repoId } = req.params;
   const page = parseInt(req.query.page, 10) || 1;
-  const limit = parseInt(req.query.limit, 10) || 20;
+  const limit = parseInt(req.query.limit, 10) || 100;
   const offset = (page - 1) * limit;
   const riskLabel = req.query.risk_label || null;
 
@@ -271,42 +271,42 @@ async function simulatePRAnalysis(req, res) {
     let cicdGate = {
       status: 'MERGE_APPROVED',
       badge_color: 'green',
-      headline: 'CI/CD Quality Gate Passed',
-      reason: 'Low risk profile. Probability of introducing defect is under the 40% safety threshold.',
+      headline: 'Quality Gate Passed',
+      reason: 'Low defect risk (<40%). Code changes meet repository stability and test coverage standards.',
     };
 
     if (riskScore >= 70) {
       cicdGate = {
         status: 'MERGE_BLOCKED',
         badge_color: 'red',
-        headline: 'CI/CD Quality Gate Blocked',
-        reason: 'Cost-sensitive threshold breached (> 70% risk). False negatives are penalized 5x. Requires senior review & passing end-to-end regression suite.',
+        headline: 'Merge Blocked — High Defect Risk',
+        reason: 'Predicted defect risk exceeds safety threshold (70%). Requires senior code review approval and passing regression tests before merge.',
       };
     } else if (riskScore >= 40) {
       cicdGate = {
         status: 'MANUAL_REVIEW_REQUIRED',
         badge_color: 'amber',
         headline: 'Peer Review Required',
-        reason: 'Moderate defect risk (40-70%). Automatic merge disabled. Requires 1 approved peer code review.',
+        reason: 'Moderate defect risk (40%–70%). Auto-merge paused. Requires at least one peer approval addressing identified risk drivers.',
       };
     }
 
     // Generate actionable developer recommendations
     const recommendations = [];
     if (features.la > 300) {
-      recommendations.push('Decompose changes: Large additions (>300 lines) have a 3.4x higher defect rate. Consider splitting into smaller atomic PRs.');
+      recommendations.push('Split Pull Request: Over 300 lines added. Break into smaller, atomic PRs to simplify review and lower regression risk.');
     }
     if (features.entropy > 1.2) {
-      recommendations.push('Reduce scatter: Modifications span multiple disparate directories. Group related changes by architectural subsystem.');
+      recommendations.push('Reduce Directory Spread: Edits span multiple folders. Isolate changes by architectural subsystem.');
     }
     if (features.exp < 5) {
-      recommendations.push('Pair programming: Author has limited experience with this codebase. Request a walkthrough with a core maintainer.');
+      recommendations.push('Request Domain Review: Author is new to this repository. Request a walkthrough with a core maintainer before merging.');
     }
     if (features.fix) {
-      recommendations.push('Regression safeguard: Bug fixes frequently cause secondary regressions. Add targeted integration tests.');
+      recommendations.push('Add Regression Tests: Bug fixes have higher defect recurrence. Add unit and integration tests covering this edge case.');
     }
     if (recommendations.length === 0) {
-      recommendations.push('Code structure is clean, well-scoped, and aligns with repository quality baselines.');
+      recommendations.push('Safe to Merge: Change scope is clean, isolated, and within safe quality baselines.');
     }
 
     // Markdown formatted comment for GitHub PR
@@ -321,7 +321,7 @@ async function simulatePRAnalysis(req, res) {
 #### 🔍 Top Contributing Factors:
 ${shapExplanations.slice(0, 3).map((e) => `- **${e.feature_name}**: ${e.explanation}`).join('\n')}
 
-#### 💡 Suggested Action:
+#### 💡 Actionable Next Steps:
 ${recommendations.map((r) => `- ${r}`).join('\n')}
 `;
 
@@ -437,21 +437,35 @@ ${recommendations.map((r) => `- ${r}`).join('\n')}
  */
 async function listAllPRs(req, res) {
   const page = parseInt(req.query.page, 10) || 1;
-  const limit = parseInt(req.query.limit, 10) || 20;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
   const offset = (page - 1) * limit;
   const riskLabel = req.query.risk_label || null;
   const search = req.query.search ? req.query.search.trim() : null;
+  const repoId = req.query.repo_id ? parseInt(req.query.repo_id, 10) : null;
 
   try {
     let query = `
       SELECT pr.id, pr.pr_number, pr.title, pr.author, pr.risk_score, pr.risk_label,
              pr.additions, pr.deletions, pr.files_changed, pr.status, pr.github_url, pr.created_at,
-             r.name AS repo_name, r.owner AS repo_owner, r.id AS repo_id
+             r.name AS repo_name, r.owner AS repo_owner, r.id AS repo_id,
+             gtr.ground_truth_status, pe.evaluation_result
       FROM pull_requests pr
       JOIN repositories r ON pr.repo_id = r.id
+      LEFT JOIN ground_truth_records gtr ON gtr.pr_id = pr.id
+      LEFT JOIN prediction_evaluations pe ON pe.pr_id = pr.id
       WHERE 1=1
     `;
     const params = [];
+
+    if (req.user && req.user.id) {
+      params.push(req.user.id);
+      query += ` AND r.user_id = $${params.length}`;
+    }
+
+    if (repoId) {
+      params.push(repoId);
+      query += ` AND r.id = $${params.length}`;
+    }
 
     if (riskLabel && ['LOW', 'MEDIUM', 'HIGH'].includes(riskLabel.toUpperCase())) {
       params.push(riskLabel.toUpperCase());
@@ -460,7 +474,7 @@ async function listAllPRs(req, res) {
 
     if (search) {
       params.push(`%${search}%`);
-      query += ` AND (pr.title ILIKE $${params.length} OR pr.author ILIKE $${params.length} OR r.name ILIKE $${params.length})`;
+      query += ` AND (pr.title ILIKE $${params.length} OR pr.author ILIKE $${params.length} OR r.name ILIKE $${params.length} OR pr.pr_number::text ILIKE $${params.length})`;
     }
 
     query += ` ORDER BY pr.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
@@ -476,13 +490,25 @@ async function listAllPRs(req, res) {
       WHERE 1=1
     `;
     const countParams = [];
+
+    if (req.user && req.user.id) {
+      countParams.push(req.user.id);
+      countQuery += ` AND r.user_id = $${countParams.length}`;
+    }
+
+    if (repoId) {
+      countParams.push(repoId);
+      countQuery += ` AND r.id = $${countParams.length}`;
+    }
+
     if (riskLabel && ['LOW', 'MEDIUM', 'HIGH'].includes(riskLabel.toUpperCase())) {
       countParams.push(riskLabel.toUpperCase());
       countQuery += ` AND pr.risk_label = $${countParams.length}`;
     }
+
     if (search) {
       countParams.push(`%${search}%`);
-      countQuery += ` AND (pr.title ILIKE $${countParams.length} OR pr.author ILIKE $${countParams.length} OR r.name ILIKE $${countParams.length})`;
+      countQuery += ` AND (pr.title ILIKE $${countParams.length} OR pr.author ILIKE $${countParams.length} OR r.name ILIKE $${countParams.length} OR pr.pr_number::text ILIKE $${countParams.length})`;
     }
 
     const countResult = await pool.query(countQuery, countParams);

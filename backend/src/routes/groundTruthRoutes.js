@@ -12,12 +12,14 @@ const { authenticate } = require('../middleware/auth');
 // All routes require authentication
 router.use(authenticate);
 
-// Ground Truth — per PR
+// Ground Truth — per PR & bulk
 router.get('/ground-truth/pr/:prId',              gt.getGroundTruthByPR);
 router.post('/ground-truth/analyze/:prId',         gt.analyzeGroundTruth);
+router.post('/ground-truth/analyze-all',           gt.analyzeAllGroundTruth);
 router.get('/ground-truth/repository/:repositoryId', gt.getGroundTruthByRepo);
 
 // Model Validation — aggregate metrics
+router.get('/model-validation/benchmark-metrics',  gt.getBenchmarkMetrics);
 router.get('/model-validation/summary',            gt.getValidationSummary);
 router.get('/model-validation/confusion-matrix',   gt.getConfusionMatrix);
 router.get('/model-validation/calibration',        gt.getCalibration);
