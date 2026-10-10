@@ -23,6 +23,7 @@ ENV/
 dist/
 build/
 coverage/
+devrisk-ai/
 
 # OS/Editor Files
 .DS_Store

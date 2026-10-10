@@ -1,27 +1,73 @@
 // ============================================================
 // SHAP Explanation Card Component
 // ============================================================
-// Displays individual SHAP feature explanations with
-// direction indicators, interactive tabs (Top, Escalators, Mitigators, All),
-// and contribution bars.
+// Displays SHAP feature attributions in simple, crisp,
+// professional technical terms for developers and reviewers.
 // ============================================================
 
 import React, { useState } from 'react';
 
-export default function ShapCard({ explanations = [] }) {
+export default function ShapCard({ explanations = [], explanation = null }) {
   const [activeTab, setActiveTab] = useState('top'); // 'top', 'escalators', 'mitigators', 'all'
   const [search, setSearch] = useState('');
+
+  // If a single explanation object is passed, render a compact item card
+  if (explanation) {
+    const isPositive = explanation.shap_value >= 0;
+    return (
+      <div
+        className="shap-item"
+        style={{
+          padding: '10px 12px',
+          background: 'var(--bg-input)',
+          borderRadius: 6,
+          border: `1px solid ${isPositive ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)'}`,
+          display: 'flex',
+          gap: 10,
+          alignItems: 'flex-start',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 10.5,
+            fontWeight: 800,
+            padding: '2px 6px',
+            borderRadius: 4,
+            background: isPositive ? 'var(--risk-high-bg)' : 'var(--risk-low-bg)',
+            color: isPositive ? 'var(--risk-high)' : 'var(--risk-low)',
+            textTransform: 'uppercase',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {isPositive ? '▲ Increases Risk' : '▼ Lowers Risk'}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>
+              {explanation.feature_name}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: isPositive ? 'var(--risk-high)' : 'var(--risk-low)' }}>
+              {isPositive ? '+' : ''}{Number(explanation.shap_value).toFixed(2)} impact
+            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+            {explanation.explanation}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!explanations || explanations.length === 0) {
     return (
       <div className="card">
         <div className="card-header">
-          <h3 className="card-title">Risk Factors (SHAP)</h3>
+          <h3 className="card-title">Risk Drivers (TreeSHAP)</h3>
         </div>
         <div className="empty-state">
           <div className="empty-state-icon">🔍</div>
-          <div className="empty-state-title">No Explanations</div>
-          <div className="empty-state-text">SHAP analysis data is not available for this PR.</div>
+          <div className="empty-state-title">No Explanations Available</div>
+          <div className="empty-state-text">SHAP attribution data is not available for this pull request.</div>
         </div>
       </div>
     );
@@ -60,9 +106,9 @@ export default function ShapCard({ explanations = [] }) {
     <div className="card animate-in">
       <div className="card-header" style={{ flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h3 className="card-title">Risk Factors (TreeSHAP Analysis)</h3>
+          <h3 className="card-title">Top Risk Drivers (TreeSHAP)</h3>
           <span className="card-subtitle">
-            {explanations.length} metrics evaluated by the model
+            {explanations.length} metrics evaluated against machine learning risk weights
           </span>
         </div>
 
@@ -100,7 +146,7 @@ export default function ShapCard({ explanations = [] }) {
               fontWeight: 600,
             }}
           >
-            ▲ Escalators
+            ▲ Increases Risk
           </button>
           <button
             type="button"
@@ -117,7 +163,7 @@ export default function ShapCard({ explanations = [] }) {
               fontWeight: 600,
             }}
           >
-            ▼ Mitigators
+            ▼ Reduces Risk
           </button>
           <button
             type="button"
@@ -144,7 +190,7 @@ export default function ShapCard({ explanations = [] }) {
           <input
             type="text"
             className="input-field"
-            placeholder="Search metric name or explanation..."
+            placeholder="Filter by metric name or description..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ fontSize: 12, padding: '6px 12px' }}
@@ -154,7 +200,7 @@ export default function ShapCard({ explanations = [] }) {
 
       {displayed.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '24px 16px', color: 'var(--text-muted)', fontSize: 13 }}>
-          No features in this category.
+          No metrics in this category.
         </div>
       ) : (
         <div className="shap-list">
@@ -178,7 +224,7 @@ export default function ShapCard({ explanations = [] }) {
                       </span>
                     </span>
                     <span style={{ fontSize: 11, color: isPositive ? 'var(--risk-high)' : 'var(--risk-low)', fontWeight: 600 }}>
-                      {isPositive ? '+' : ''}{Number(item.shap_value).toFixed(3)} SHAP
+                      {isPositive ? '+' : ''}{Number(item.shap_value).toFixed(2)} impact
                     </span>
                   </div>
                   <div className="shap-explanation">{item.explanation}</div>

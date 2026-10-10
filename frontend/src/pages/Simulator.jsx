@@ -1,10 +1,9 @@
 // ============================================================
-// DevRisk Playground — Interactive PR Risk Simulator
+// DevRisk Playground — PR "What-If" Risk Simulator
 // ============================================================
-// Allows developers and reviewers to simulate code changes,
-// tweak 14 ApacheJIT risk metrics with live sliders, inspect
-// TreeSHAP factor explanations, preview CI/CD merge-gate
-// decisions, and save simulated changes directly to PostgreSQL.
+// Interactive developer sandbox to test code change risk, tune
+// metrics, inspect TreeSHAP drivers, preview CI/CD gates, and save
+// counterfactual changes to PostgreSQL.
 // ============================================================
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -14,13 +13,12 @@ import RiskGauge from '../components/RiskGauge';
 import ShapCard from '../components/ShapCard';
 import FeatureTooltip from '../components/FeatureTooltip';
 import { getFeatureDef } from '../utils/featureDefinitions';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ArrowLeft, Sliders, Shield, Zap, Sparkles, AlertTriangle } from 'lucide-react';
 
 const PRESETS = [
   {
-    name: '🔴 High-Risk Architecture Overhaul',
-    badge: 'HIGH RISK',
-    badgeColor: 'badge-high',
+    name: '🔴 Major Refactor',
+    tag: 'High Risk',
     title: 'Refactor Core JWT Auth & Session Handling',
     features: {
       ns: 5, nd: 4, nf: 8, entropy: 1.65, la: 420, ld: 115, lt: 750,
@@ -28,9 +26,8 @@ const PRESETS = [
     },
   },
   {
-    name: '🟡 Medium-Risk Payment Feature',
-    badge: 'MEDIUM RISK',
-    badgeColor: 'badge-medium',
+    name: '🟡 New Feature',
+    tag: 'Moderate',
     title: 'Add Stripe Webhook Listener & Routing',
     features: {
       ns: 2, nd: 2, nf: 4, entropy: 0.85, la: 180, ld: 45, lt: 420,
@@ -38,9 +35,8 @@ const PRESETS = [
     },
   },
   {
-    name: '🟢 Low-Risk Docs & Typo Fix',
-    badge: 'LOW RISK',
-    badgeColor: 'badge-low',
+    name: '🟢 Minor Fix / Docs',
+    tag: 'Safe',
     title: 'Update API Documentation & Fix Headers',
     features: {
       ns: 1, nd: 1, nf: 2, entropy: 0.20, la: 15, ld: 4, lt: 120,
@@ -48,9 +44,8 @@ const PRESETS = [
     },
   },
   {
-    name: '⚠️ Junior Dev on Stale Core File',
-    badge: 'HIGH REGRESSION',
-    badgeColor: 'badge-high',
+    name: '⚠️ Legacy Hotfix',
+    tag: 'Regression Risk',
     title: 'Hotfix Stale Database Pooling Connection',
     features: {
       ns: 3, nd: 2, nf: 3, entropy: 1.20, la: 140, ld: 90, lt: 650,
@@ -63,7 +58,6 @@ export default function Simulator() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Initialize from location.state if navigated from PR detail, else default preset
   const initialFeatures = location.state?.features || PRESETS[0].features;
   const initialTitle = location.state?.title || PRESETS[0].title;
 
@@ -75,6 +69,12 @@ export default function Simulator() {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Active category tab: 'all' | 'churn' | 'architecture' | 'developer' | 'stability'
+  const [categoryTab, setCategoryTab] = useState('churn');
+
+  // Right column insights tab: 'shap' | 'remediation'
+  const [insightTab, setInsightTab] = useState('shap');
+
   // Persistence state
   const [repos, setRepos] = useState([]);
   const [selectedRepoId, setSelectedRepoId] = useState('');
@@ -82,7 +82,7 @@ export default function Simulator() {
   const [savedPr, setSavedPr] = useState(null);
   const [saveError, setSaveError] = useState(null);
 
-  // Tracked real PRs from database
+  // Tracked real PRs
   const [searchParams] = useSearchParams();
   const prIdFromUrl = searchParams.get('prId') || location.state?.prId;
   const [trackedPRs, setTrackedPRs] = useState([]);
@@ -90,11 +90,9 @@ export default function Simulator() {
   const [selectedPRId, setSelectedPRId] = useState(prIdFromUrl || sessionStorage.getItem('simulator_selected_pr_id') || '');
   const [loadingPR, setLoadingPR] = useState(false);
   const [loadPRMessage, setLoadPRMessage] = useState(null);
-  const [showScopeInfo, setShowScopeInfo] = useState(false);
 
   const debounceTimerRef = useRef(null);
 
-  // Load available repositories & all tracked PRs for simulator selection
   useEffect(() => {
     async function loadData() {
       try {
@@ -107,8 +105,7 @@ export default function Simulator() {
         if (repoList.length > 0) {
           setSelectedRepoId(repoList[0].id);
         }
-        const prList = prRes.data.pull_requests || [];
-        setTrackedPRs(prList);
+        setTrackedPRs(prRes.data.pull_requests || []);
       } catch (err) {
         console.error('Failed to load repositories or PRs:', err);
       }
@@ -116,7 +113,6 @@ export default function Simulator() {
     loadData();
   }, []);
 
-  // Run simulation API call
   const executeSimulation = useCallback(async (featuresToSimulate, titleToSimulate, save = false) => {
     setLoading(true);
     try {
@@ -143,16 +139,15 @@ export default function Simulator() {
     } finally {
       setLoading(false);
     }
-  }, [author, prTitle]); // Removed selectedRepoId from dependency so we can pass it directly if needed
+  }, [author, prTitle, selectedRepoId]);
 
-  // Run simulation API call wrapping
   const triggerSimulationWithRepo = async (newRepoId) => {
     setLoading(true);
     try {
       const payload = {
         title: prTitle,
         author,
-        features: features,
+        features,
         save_to_db: false,
         repo_id: newRepoId ? parseInt(newRepoId, 10) : null,
       };
@@ -165,7 +160,6 @@ export default function Simulator() {
     }
   };
 
-  // Debounced trigger for sliders
   const debouncedSimulate = useCallback((updatedFeatures, title) => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -175,7 +169,6 @@ export default function Simulator() {
     }, 150);
   }, [executeSimulation]);
 
-  // Load a specific real PR from the database into the simulator
   const loadSpecificPR = useCallback(async (prId) => {
     if (!prId) return;
     setLoadingPR(true);
@@ -211,10 +204,10 @@ export default function Simulator() {
           sexp: rawFeatures.sexp !== undefined ? Number(rawFeatures.sexp) : 2,
         };
         setFeatures(extractedFeatures);
-        setActivePreset(-1); // Switch to custom mode
+        setActivePreset(-1);
         executeSimulation(extractedFeatures, prResponse.title);
-        setLoadPRMessage(`✅ Loaded real Pull Request #${prResponse.pr_number || prResponse.id}: "${prResponse.title}"! Sliders are now populated with its live repository metrics.`);
-        setTimeout(() => setLoadPRMessage(null), 7000);
+        setLoadPRMessage(`✅ Loaded PR #${prResponse.pr_number || prResponse.id}: "${prResponse.title}" into simulator.`);
+        setTimeout(() => setLoadPRMessage(null), 5000);
       }
     } catch (err) {
       console.error('Failed to load PR into simulator:', err);
@@ -223,14 +216,12 @@ export default function Simulator() {
     }
   }, [executeSimulation]);
 
-  // If prId parameter is passed in URL or state, load it automatically
   useEffect(() => {
     if (prIdFromUrl) {
       loadSpecificPR(prIdFromUrl);
     }
   }, [prIdFromUrl, loadSpecificPR]);
 
-  // Initial simulation on mount
   useEffect(() => {
     if (!prIdFromUrl) {
       executeSimulation(features, prTitle);
@@ -248,848 +239,542 @@ export default function Simulator() {
     executeSimulation(p.features, p.title);
   };
 
-  const handleSliderChange = (key, value) => {
-    const updated = { ...features, [key]: Number(value) };
+  const handleSliderChange = (featureName, value) => {
+    setActivePreset(-1);
+    const numValue = featureName === 'entropy' ? parseFloat(value) : parseInt(value, 10);
+    const updated = { ...features, [featureName]: numValue };
     setFeatures(updated);
-    setActivePreset(-1); // custom mode
     debouncedSimulate(updated, prTitle);
   };
 
   const handleSaveToDb = async () => {
     setSavingToDb(true);
-    setSavedPr(null);
-    setSaveError(null);
-    try {
-      await executeSimulation(features, prTitle, true);
-    } finally {
-      setSavingToDb(false);
-    }
+    await executeSimulation(features, prTitle, true);
+    setSavingToDb(false);
   };
 
   const handleCopyMarkdown = () => {
     if (!result?.simulated_pr?.github_markdown_comment) return;
     navigator.clipboard.writeText(result.simulated_pr.github_markdown_comment);
     setCopied(true);
-    setTimeout(() => setCopied(false), 3000);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const simData = result?.simulated_pr;
   const cicd = simData?.ci_cd_gate;
   const blast = simData?.blast_radius;
+  const shapExplanations = result?.shap_explanations || [];
+  const recommendations = simData?.recommendations || [];
+
+  // Helper for rendering clean slider rows with inline status pills (NO 11 SCREAMING BOXES)
+  const renderSlider = (key, label, min, max, step = 1, unit = '') => {
+    const val = features[key] ?? 0;
+    const def = getFeatureDef(key);
+    const interp = def.interpretValue(val);
+    const isHigh = interp.rating === 'risky';
+    const isMod = interp.rating === 'moderate';
+
+    return (
+      <div key={key} style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{label}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>({key})</span>
+            <FeatureTooltip featureName={key} value={val} />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                padding: '2px 7px',
+                borderRadius: 4,
+                textTransform: 'uppercase',
+                background: isHigh ? 'var(--risk-high-bg)' : isMod ? 'var(--risk-medium-bg)' : 'var(--risk-low-bg)',
+                color: isHigh ? 'var(--risk-high)' : isMod ? 'var(--risk-medium)' : 'var(--risk-low)',
+                border: `1px solid ${isHigh ? 'rgba(239, 68, 68, 0.25)' : isMod ? 'rgba(234, 179, 8, 0.25)' : 'rgba(34, 197, 94, 0.25)'}`,
+              }}
+            >
+              {interp.label}
+            </span>
+            <span
+              style={{
+                fontSize: 13.5,
+                fontWeight: 700,
+                fontFamily: 'monospace',
+                color: isHigh ? 'var(--risk-high)' : 'var(--text-primary)',
+              }}
+            >
+              {unit === 'lines' && key === 'la' ? `+${val}` : unit === 'lines' && key === 'ld' ? `-${val}` : val} {unit}
+            </span>
+          </div>
+        </div>
+
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={val}
+          onChange={(e) => handleSliderChange(key, e.target.value)}
+          className="risk-slider"
+        />
+      </div>
+    );
+  };
+
+  const filteredTrackedPRs = filterRepoId
+    ? trackedPRs.filter((pr) => pr.repo_id.toString() === filterRepoId)
+    : trackedPRs;
 
   return (
-    <>
-      <div className="page-header" style={{ position: 'relative' }}>
-        <button 
-          onClick={() => navigate(-1)} 
-          className="btn btn-secondary"
-          style={{ marginBottom: 16, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-medium)', color: 'var(--text-secondary)' }}
-        >
-          <span>← Back</span>
-        </button>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-          <div style={{ flex: 1 }}>
-            <h1 className="page-title" style={{ marginTop: 0, marginBottom: 8 }}>Playground</h1>
-            <p className="page-subtitle" style={{ margin: 0 }}>
-              Interactive developer sandbox to test code change risk, tune 14 metrics, and preview CI/CD gates.
-            </p>
+    <div className="dashboard-container">
+      {/* 1. Header & Quick Action Row */}
+      <div className="page-header" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => navigate('/')}
+              style={{ padding: '6px 12px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <ArrowLeft size={14} /> Back
+            </button>
+            <div>
+              <h1 className="page-title" style={{ margin: 0, fontSize: 20 }}>PR "What-If" Simulator</h1>
+              <p className="page-subtitle" style={{ margin: '2px 0 0', fontSize: 12 }}>
+                Simulate code change risk and evaluate CI/CD quality gate impact before pushing to GitHub.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              className="btn btn-secondary"
+              onClick={handleCopyMarkdown}
+              disabled={!simData}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '7px 12px' }}
+              title="Copy markdown assessment comment for GitHub PR"
+            >
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              <span>{copied ? 'Copied' : 'Copy PR Comment'}</span>
+            </button>
+
+            <button
+              className="btn btn-primary"
+              onClick={handleSaveToDb}
+              disabled={savingToDb || loading}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '7px 14px' }}
+            >
+              <span>{savingToDb ? 'Saving...' : 'Save to Tracked PRs'}</span>
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Save to DB Confirmation Banner */}
+      {/* Save Success Banner */}
       {savedPr && (
-        <div className="card animate-in" style={{
-          marginBottom: 24,
-          background: 'rgba(16, 185, 129, 0.12)',
-          border: '1px solid rgba(16, 185, 129, 0.4)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 12
-        }}>
-          <div>
-            <strong style={{ color: 'var(--risk-low)', fontSize: 14 }}>
-              Simulated PR Successfully Persisted to Database!
-            </strong>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
-              "{savedPr.title}" is now permanently recorded in PostgreSQL and visible on Dashboard and Repository views.
-            </div>
+        <div className="card animate-in" style={{ marginBottom: 16, padding: '12px 18px', background: 'var(--risk-low-bg)', border: '1px solid var(--risk-low)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 13, color: 'var(--risk-low)', fontWeight: 600 }}>
+            ✅ Simulated PR "{savedPr.title}" saved to PostgreSQL! Visible in Dashboard and Review Queue.
           </div>
-          <button
-            className="btn btn-primary"
-            onClick={() => navigate(`/prs/${savedPr.id}`)}
-            style={{ fontSize: 12, padding: '6px 14px' }}
-          >
-            View Full PR Report #{savedPr.id} →
+          <button className="btn btn-primary" onClick={() => navigate(`/prs/${savedPr.id}`)} style={{ fontSize: 12, padding: '5px 12px' }}>
+            View Report ↗
           </button>
         </div>
       )}
 
       {saveError && (
-        <div className="card animate-in" style={{
-          marginBottom: 24,
-          background: 'rgba(239, 68, 68, 0.12)',
-          border: '1px solid rgba(239, 68, 68, 0.4)',
-          color: 'var(--risk-high)',
-          fontSize: 13,
-        }}>
+        <div className="card animate-in" style={{ marginBottom: 16, padding: '10px 16px', background: 'var(--risk-high-bg)', border: '1px solid var(--risk-high)', color: 'var(--risk-high)', fontSize: 12.5 }}>
           ❌ {saveError}
         </div>
       )}
 
-      {/* Scope & Architecture Clarity Banner */}
-      <div className="card animate-in" style={{
-        marginBottom: 20,
-        padding: '16px 20px',
-        borderRadius: 'var(--radius-md)',
-        background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.14) 0%, rgba(139, 92, 246, 0.08) 100%)',
-        border: '1px solid rgba(99, 102, 241, 0.35)',
-        display: 'flex',
-        gap: 16,
-        alignItems: 'flex-start',
-      }}>
-        <div style={{ fontSize: 24, lineHeight: 1, marginTop: 2 }}>💡</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
-              Playground Sandbox vs. Live Pull Request Hub
-            </div>
-            <button
-              onClick={() => setShowScopeInfo(!showScopeInfo)}
-              style={{ background: 'none', border: 'none', color: 'var(--accent-primary)', fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0 }}
-            >
-              {showScopeInfo ? 'Show less ↑' : 'Read more ↓'}
-            </button>
-          </div>
-          {showScopeInfo && (
-            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: 8 }}>
-              DevRisk AI actively tracks and evaluates <strong>all pull requests across all your connected repositories</strong>.
-              To inspect all active PRs and their real-time ML defect verdicts, visit the{' '}
-              <Link to="/" style={{ color: 'var(--accent-primary)', fontWeight: 700, textDecoration: 'underline' }}>
-                Pull Request Dashboard →
-              </Link>.
-              <br />
-              This <strong>Playground</strong> is an interactive "what-if" developer sandbox: you can simulate counterfactual code changes on <strong>any real PR loaded below</strong> or test custom slider values before committing code to GitHub.
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Real Tracked PR Loader Card */}
-      <div className="card animate-in" style={{
-        marginBottom: 24,
-        padding: '22px 24px',
-        background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(34, 211, 238, 0.02) 100%)',
-        border: '1px solid rgba(16, 185, 129, 0.3)',
-        borderLeft: '4px solid #10b981',
-        boxShadow: '0 8px 32px -8px rgba(16, 185, 129, 0.15)',
-        position: 'relative',
-        overflow: 'hidden'
-      }}>
-        <div style={{
-          position: 'absolute', top: '-50%', left: '-5%', width: '250px', height: '250px',
-          background: 'radial-gradient(circle, rgba(16,185,129,0.15) 0%, rgba(0,0,0,0) 70%)',
-          borderRadius: '50%', pointerEvents: 'none'
-        }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 20, position: 'relative', zIndex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            <div style={{ 
-              background: 'rgba(16, 185, 129, 0.15)', 
-              color: '#10b981', 
-              padding: '10px', 
-              borderRadius: '12px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              boxShadow: '0 0 15px rgba(16, 185, 129, 0.2)'
-            }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-            </div>
-            <div>
-              <h2 style={{ fontSize: 16, fontWeight: 700, color: '#10b981', margin: 0, letterSpacing: '0.2px' }}>
-                Load Real Tracked Pull Request
-              </h2>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-                Select any PR from your connected repositories to instantly populate the Simulator with its live metrics
-              </div>
-            </div>
-          </div>
-          <span style={{ 
-            fontSize: 11.5, 
-            padding: '5px 12px', 
-            background: 'rgba(16, 185, 129, 0.15)', 
-            color: '#10b981',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            borderRadius: '20px',
-            fontWeight: 600
-          }}>
-            {trackedPRs.length} Tracked PRs Ready
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
-            className="input-field"
-            style={{ flex: 1, minWidth: 280, cursor: 'pointer', fontSize: 13 }}
-            value={filterRepoId}
-            onChange={(e) => {
-              const val = e.target.value;
-              setFilterRepoId(val);
-              sessionStorage.setItem('simulator_filter_repo_id', val);
-              setSelectedPRId(''); // reset PR selection on repo change
-              sessionStorage.removeItem('simulator_selected_pr_id');
-            }}
-            disabled={loadingPR}
-          >
-            <option value="">-- First: Select a Repository --</option>
-            {repos.map(r => (
-              <option key={r.id} value={r.id}>{r.owner}/{r.name}</option>
+      {/* 2. Unified Control Strip: Presets & Tracked PR Loader */}
+      <div className="card" style={{ padding: '16px 20px', marginBottom: 20 }}>
+        {/* Source Row: Presets & Real PR Loader */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, marginBottom: 14 }}>
+          {/* Quick Scenario Chips */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Quick Scenarios:
+            </span>
+            {PRESETS.map((preset, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handlePresetSelect(idx)}
+                style={{
+                  background: activePreset === idx ? 'var(--accent-primary)' : 'var(--bg-input)',
+                  color: activePreset === idx ? '#ffffff' : 'var(--text-secondary)',
+                  border: activePreset === idx ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                  borderRadius: 16,
+                  padding: '4px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {preset.name}
+              </button>
             ))}
-          </select>
-
-          <select
-            className="input-field"
-            style={{ flex: 1, minWidth: 280, cursor: filterRepoId ? 'pointer' : 'not-allowed', fontSize: 13, opacity: filterRepoId ? 1 : 0.6 }}
-            value={selectedPRId}
-            onChange={(e) => {
-              const id = e.target.value;
-              setSelectedPRId(id);
-              if (id) {
-                sessionStorage.setItem('simulator_selected_pr_id', id);
-                loadSpecificPR(id);
-              } else {
-                sessionStorage.removeItem('simulator_selected_pr_id');
-              }
-            }}
-            disabled={loadingPR || !filterRepoId}
-          >
-            <option value="">{filterRepoId ? "-- Second: Choose a PR to load --" : "-- Please select a repository first --"}</option>
-            {trackedPRs.filter(pr => pr.repo_id == filterRepoId).map((pr) => (
-              <option key={pr.id} value={pr.id}>
-                #{pr.pr_number || pr.id} — {pr.title} • {pr.risk_label || 'REVIEW'} ({Math.round(pr.risk_score || 0)}% risk)
-              </option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => navigate(`/prs/${selectedPRId}`)}
-            style={{ fontSize: 12, padding: '9px 16px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6, opacity: selectedPRId ? 1 : 0.5, cursor: selectedPRId ? 'pointer' : 'not-allowed' }}
-            disabled={!selectedPRId}
-          >
-            <span>View Full PR Analysis</span>
-            <span>↗</span>
-          </button>
-        </div>
-
-        {loadPRMessage && (
-          <div style={{
-            marginTop: 12,
-            padding: '8px 14px',
-            borderRadius: 'var(--radius-sm)',
-            background: 'var(--risk-low-bg)',
-            border: '1px solid var(--risk-low)',
-            fontSize: 12.5,
-            color: 'var(--risk-low)',
-            fontWeight: 600,
-          }}>
-            {loadPRMessage}
           </div>
-        )}
-      </div>
 
-      {/* Configuration Section: Presets & Target Config */}
-      <div className="card animate-in" style={{ marginBottom: 24 }}>
-        <div className="card-header" style={{ marginBottom: 12 }}>
-          <h3 className="card-title">Quick Preset Scenarios</h3>
-          <span className="card-subtitle">Select a scenario or adjust the sliders below for custom changes</span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
-          {PRESETS.map((preset, idx) => (
-            <label
-              key={idx}
-              className={`preset-btn ${activePreset === idx ? 'active' : ''}`}
-              style={{
-                background: activePreset === idx ? 'var(--bg-card-hover)' : 'var(--bg-page)',
-                border: activePreset === idx ? '2px solid var(--accent-purple)' : '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-md)',
-                padding: '12px 16px',
-                textAlign: 'left',
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)',
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '12px',
-                margin: 0
+          {/* Real Tracked PR Loader */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              📥 Or Inspect Tracked PR:
+            </span>
+
+            <select
+              className="input-field"
+              style={{ fontSize: 12, padding: '5px 10px', minWidth: 160 }}
+              value={filterRepoId}
+              onChange={(e) => {
+                setFilterRepoId(e.target.value);
+                setSelectedPRId('');
               }}
             >
-              <div style={{ marginTop: '2px', flexShrink: 0 }}>
-                <input 
-                  type="radio" 
-                  name="preset-selection"
-                  checked={activePreset === idx} 
-                  onChange={() => handlePresetSelect(idx)}
-                  style={{ cursor: 'pointer', margin: 0 }}
-                />
-              </div>
-              <div>
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13, lineHeight: 1.4, whiteSpace: 'normal', overflowWrap: 'break-word' }}>
-                  {preset.name}
-                </div>
-              </div>
-            </label>
-          ))}
+              <option value="">All Repositories</option>
+              {repos.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.owner}/{r.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className="input-field"
+              style={{ fontSize: 12, padding: '5px 10px', minWidth: 260, maxWidth: 340 }}
+              value={selectedPRId}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedPRId(val);
+                if (val) loadSpecificPR(val);
+              }}
+              disabled={loadingPR}
+            >
+              <option value="">Choose a PR to inspect...</option>
+              {filteredTrackedPRs.map((pr) => (
+                <option key={pr.id} value={pr.id}>
+                  #{pr.pr_number || pr.id} — {pr.title ? (pr.title.length > 40 ? pr.title.slice(0, 40) + '...' : pr.title) : 'Untitled'} ({Math.round(pr.risk_score || 0)}% risk)
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        <div style={{ height: 1, background: 'var(--border-medium)', margin: '0 -20px 24px -20px' }}></div>
+        {/* Dedicated Simulation Title Bar with Clear Label & Context */}
+        <div style={{ paddingTop: 12, borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+              🏷️ Simulation Name / PR Title:
+            </span>
+          </div>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-end' }}>
-          <div style={{ flex: '1 1 200px' }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-              PR Title
-            </label>
+          <div style={{ flex: 1, minWidth: 260, display: 'flex', alignItems: 'center', gap: 10 }}>
             <input
               type="text"
               className="input-field"
+              placeholder="Enter a descriptive title for this simulated change..."
               value={prTitle}
               onChange={(e) => {
                 setPrTitle(e.target.value);
                 debouncedSimulate(features, e.target.value);
               }}
-              placeholder="e.g. Add payment webhooks"
+              style={{ fontSize: 12.5, padding: '6px 12px', flex: 1, fontWeight: 600, color: 'var(--text-primary)' }}
             />
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+              Used for PR review comments & saved records
+            </span>
           </div>
 
-          {repos.length > 0 && (
-            <div style={{ flex: '1 1 200px' }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-                Target Tracked Repository (For Saving)
-              </label>
-              <select
-                className="input-field"
-                value={selectedRepoId}
-                onChange={(e) => {
-                  setSelectedRepoId(e.target.value);
-                  triggerSimulationWithRepo(e.target.value);
-                }}
-              >
-                {repos.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.owner}/{r.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {loadPRMessage && (
+            <span style={{ fontSize: 12, color: 'var(--risk-low)', fontWeight: 600 }}>
+              {loadPRMessage}
+            </span>
           )}
-
-          <div style={{ flex: '1 1 200px' }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
-              Author Name
-            </label>
-            <input
-              type="text"
-              className="input-field"
-              value={author}
-              onChange={(e) => setAuthor(e.target.value)}
-              placeholder="developer_sandbox"
-            />
-          </div>
-
-          <div style={{ flex: '1 1 200px', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 8 }}>
-            <button
-              className="btn"
-              onClick={handleCopyMarkdown}
-              disabled={!simData}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, width: '100%', padding: '6px 10px',
-                background: copied ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-glass)',
-                border: copied ? '1px solid var(--risk-low)' : '1px solid var(--border-medium)',
-                color: copied ? 'var(--risk-low)' : 'var(--text-primary)',
-                transition: 'all 0.2s ease',
-              }}
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-              {copied ? 'Copied!' : 'Copy PR Comment'}
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleSaveToDb}
-              disabled={savingToDb || loading}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, width: '100%', padding: '6px 10px' }}
-            >
-              {savingToDb ? 'Saving...' : 'Save to Tracked PRs'}
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* Two-Column Simulation Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 24 }}>
+      {/* 3. Simulator Cockpit (Two Columns with Sticky Verdict) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.15fr) minmax(360px, 0.85fr)', gap: 20, alignItems: 'flex-start' }}>
         
-        {/* Left Column: Interactive Sliders */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          
-          {/* Group 1: Churn & Volume */}
-          <div className="card">
-            <div className="card-header" style={{ marginBottom: 14 }}>
-              <div>
-                <h3 className="card-title">📝 1. Code Churn & Volume</h3>
-                <span className="card-subtitle">Volume of modifications and change concentration</span>
-              </div>
-            </div>
-
-            <div className="slider-group">
-              {/* la */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Lines Added (<code>la</code>)</span>
-                    <FeatureTooltip featureName="la" value={features.la} />
-                  </div>
-                  <strong style={{ color: features.la > 300 ? 'var(--risk-high)' : 'var(--text-primary)' }}>
-                    +{features.la} lines
-                  </strong>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="1000"
-                  step="10"
-                  value={features.la}
-                  onChange={(e) => handleSliderChange('la', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('la').interpretValue(features.la).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('la').interpretValue(features.la).meaning}</span>
-                </div>
-              </div>
-
-              {/* ld */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Lines Deleted (<code>ld</code>)</span>
-                    <FeatureTooltip featureName="ld" value={features.ld} />
-                  </div>
-                  <strong style={{ color: features.ld > 100 ? 'var(--risk-high)' : 'var(--text-primary)' }}>
-                    -{features.ld} lines
-                  </strong>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="500"
-                  step="5"
-                  value={features.ld}
-                  onChange={(e) => handleSliderChange('ld', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('ld').interpretValue(features.ld).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('ld').interpretValue(features.ld).meaning}</span>
-                </div>
-              </div>
-
-              {/* lt */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Lines in Files (<code>lt</code>)</span>
-                    <FeatureTooltip featureName="lt" value={features.lt || 500} />
-                  </div>
-                  <strong>{features.lt || 500} lines</strong>
-                </div>
-                <input
-                  type="range"
-                  min="50"
-                  max="3000"
-                  step="50"
-                  value={features.lt || 500}
-                  onChange={(e) => handleSliderChange('lt', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('lt').interpretValue(features.lt || 500).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('lt').interpretValue(features.lt || 500).meaning}</span>
-                </div>
-              </div>
-
-              {/* entropy */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Change Entropy (<code>entropy</code>)</span>
-                    <FeatureTooltip featureName="entropy" value={features.entropy} />
-                  </div>
-                  <strong style={{ color: features.entropy > 1.2 ? 'var(--risk-high)' : 'var(--text-primary)' }}>
-                    {Number(features.entropy).toFixed(2)}
-                  </strong>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="2.5"
-                  step="0.05"
-                  value={features.entropy}
-                  onChange={(e) => handleSliderChange('entropy', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('entropy').interpretValue(features.entropy).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('entropy').interpretValue(features.entropy).meaning}</span>
-                </div>
-              </div>
-            </div>
+        {/* LEFT COLUMN: Metric Tuner with Category Switcher (No 11 screaming boxes!) */}
+        <div className="card" style={{ padding: 20 }}>
+          {/* Category Tabs */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 12 }}>
+            <button
+              type="button"
+              className={`chip ${categoryTab === 'churn' ? 'active' : ''}`}
+              onClick={() => setCategoryTab('churn')}
+              style={{ borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600 }}
+            >
+              📝 Code Churn (4)
+            </button>
+            <button
+              type="button"
+              className={`chip ${categoryTab === 'architecture' ? 'active' : ''}`}
+              onClick={() => setCategoryTab('architecture')}
+              style={{ borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600 }}
+            >
+              🏛️ Architecture (3)
+            </button>
+            <button
+              type="button"
+              className={`chip ${categoryTab === 'developer' ? 'active' : ''}`}
+              onClick={() => setCategoryTab('developer')}
+              style={{ borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600 }}
+            >
+              👤 Contributor (3)
+            </button>
+            <button
+              type="button"
+              className={`chip ${categoryTab === 'stability' ? 'active' : ''}`}
+              onClick={() => setCategoryTab('stability')}
+              style={{ borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600 }}
+            >
+              ⏱️ File Stability (2)
+            </button>
+            <button
+              type="button"
+              className={`chip ${categoryTab === 'all' ? 'active' : ''}`}
+              onClick={() => setCategoryTab('all')}
+              style={{ borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600 }}
+            >
+              👁️ View All (12)
+            </button>
           </div>
 
-          {/* Group 2: Architectural Footprint */}
-          <div className="card">
-            <div className="card-header" style={{ marginBottom: 14 }}>
-              <div>
-                <h3 className="card-title">🏛️ 2. Architectural Footprint</h3>
-                <span className="card-subtitle">Diffusion across files, folders, and subsystems</span>
+          {/* Metric Category 1: Code Churn */}
+          {(categoryTab === 'churn' || categoryTab === 'all') && (
+            <div style={{ marginBottom: categoryTab === 'all' ? 24 : 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>📝 Code Churn & Volume</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>— Modification scale & density</span>
               </div>
+              {renderSlider('la', 'Lines Added', 0, 1000, 10, 'lines')}
+              {renderSlider('ld', 'Lines Deleted', 0, 500, 5, 'lines')}
+              {renderSlider('lt', 'Lines in Files', 50, 3000, 50, 'lines')}
+              {renderSlider('entropy', 'Change Entropy (Scatter)', 0, 2.5, 0.05, '')}
             </div>
+          )}
 
-            <div className="slider-group">
-              {/* nf */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Files Modified (<code>nf</code>)</span>
-                    <FeatureTooltip featureName="nf" value={features.nf} />
-                  </div>
-                  <strong style={{ color: features.nf > 5 ? 'var(--risk-high)' : 'var(--text-primary)' }}>
-                    {features.nf} files
-                  </strong>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="25"
-                  value={features.nf}
-                  onChange={(e) => handleSliderChange('nf', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('nf').interpretValue(features.nf).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('nf').interpretValue(features.nf).meaning}</span>
-                </div>
+          {/* Metric Category 2: Architecture */}
+          {(categoryTab === 'architecture' || categoryTab === 'all') && (
+            <div style={{ marginBottom: categoryTab === 'all' ? 24 : 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>🏛️ Architectural Footprint</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>— Package & subsystem spread</span>
               </div>
-
-              {/* nd */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Directories Touched (<code>nd</code>)</span>
-                    <FeatureTooltip featureName="nd" value={features.nd} />
-                  </div>
-                  <strong>{features.nd} directories</strong>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={features.nd}
-                  onChange={(e) => handleSliderChange('nd', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('nd').interpretValue(features.nd).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('nd').interpretValue(features.nd).meaning}</span>
-                </div>
-              </div>
-
-              {/* ns */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Subsystems Modified (<code>ns</code>)</span>
-                    <FeatureTooltip featureName="ns" value={features.ns} />
-                  </div>
-                  <strong style={{ color: features.ns > 2 ? 'var(--risk-high)' : 'var(--text-primary)' }}>
-                    {features.ns} subsystems
-                  </strong>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="6"
-                  value={features.ns}
-                  onChange={(e) => handleSliderChange('ns', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('ns').interpretValue(features.ns).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('ns').interpretValue(features.ns).meaning}</span>
-                </div>
-              </div>
+              {renderSlider('nf', 'Files Modified', 1, 25, 1, 'files')}
+              {renderSlider('nd', 'Directories Touched', 1, 10, 1, 'dirs')}
+              {renderSlider('ns', 'Subsystems Modified', 1, 6, 1, 'subsystems')}
             </div>
-          </div>
+          )}
 
-          {/* Group 3: Contributor Familiarity */}
-          <div className="card">
-            <div className="card-header" style={{ marginBottom: 14 }}>
-              <div>
-                <h3 className="card-title">👤 3. Developer Context & Experience</h3>
-                <span className="card-subtitle">Author familiarity and domain background</span>
+          {/* Metric Category 3: Developer Context */}
+          {(categoryTab === 'developer' || categoryTab === 'all') && (
+            <div style={{ marginBottom: categoryTab === 'all' ? 24 : 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>👤 Contributor Experience</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>— Author domain familiarity</span>
               </div>
+              {renderSlider('exp', 'Author Total Commits', 0, 100, 1, 'commits')}
+              {renderSlider('sexp', 'Subsystem Commits', 0, 50, 1, 'commits')}
+              {renderSlider('ndev', 'Prior Authors on Files', 1, 25, 1, 'devs')}
             </div>
+          )}
 
-            <div className="slider-group">
-              {/* exp */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Author Total Commits (<code>exp</code>)</span>
-                    <FeatureTooltip featureName="exp" value={features.exp} />
-                  </div>
-                  <strong style={{ color: features.exp < 5 ? 'var(--risk-high)' : 'var(--risk-low)' }}>
-                    {features.exp} commits
-                  </strong>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={features.exp}
-                  onChange={(e) => handleSliderChange('exp', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('exp').interpretValue(features.exp).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('exp').interpretValue(features.exp).meaning}</span>
-                </div>
+          {/* Metric Category 4: File Stability */}
+          {(categoryTab === 'stability' || categoryTab === 'all') && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>⏱️ File Stability & Intent</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>— Historical dormancy & fix status</span>
               </div>
+              {renderSlider('age', 'File Dormancy', 1, 365, 1, 'days')}
 
-              {/* sexp */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Subsystem Commits (<code>sexp</code>)</span>
-                    <FeatureTooltip featureName="sexp" value={features.sexp} />
-                  </div>
-                  <strong>{features.sexp} commits</strong>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="50"
-                  value={features.sexp}
-                  onChange={(e) => handleSliderChange('sexp', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('sexp').interpretValue(features.sexp).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('sexp').interpretValue(features.sexp).meaning}</span>
-                </div>
-              </div>
-
-              {/* ndev */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>Prior Authors on Files (<code>ndev</code>)</span>
-                    <FeatureTooltip featureName="ndev" value={features.ndev || 5} />
-                  </div>
-                  <strong>{features.ndev || 5} developers</strong>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="25"
-                  value={features.ndev || 5}
-                  onChange={(e) => handleSliderChange('ndev', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('ndev').interpretValue(features.ndev || 5).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('ndev').interpretValue(features.ndev || 5).meaning}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Group 4: Code Stability & Bug Status */}
-          <div className="card">
-            <div className="card-header" style={{ marginBottom: 14 }}>
-              <div>
-                <h3 className="card-title">🛡️ 4. File Stability & Recurrence Risk</h3>
-                <span className="card-subtitle">Historical file age, revisions, and bug status</span>
-              </div>
-            </div>
-
-            <div className="slider-group">
-              {/* age */}
-              <div className="slider-row">
-                <div className="slider-label">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>File Age / Dormancy (<code>age</code>)</span>
-                    <FeatureTooltip featureName="age" value={features.age} />
-                  </div>
-                  <strong>{features.age} days dormant</strong>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="365"
-                  value={features.age}
-                  onChange={(e) => handleSliderChange('age', e.target.value)}
-                  className="risk-slider"
-                />
-                <div className={`feature-tooltip-rating rating-${getFeatureDef('age').interpretValue(features.age).rating}`} style={{ marginTop: 4, fontSize: 11.5 }}>
-                  <span className="rating-dot"></span>
-                  <span>{getFeatureDef('age').interpretValue(features.age).meaning}</span>
-                </div>
-              </div>
-
-              {/* fix */}
-              <div className="slider-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, padding: '12px 14px', borderRadius: 'var(--radius-md)', background: 'var(--bg-glass)', border: '1px solid var(--border-subtle)' }}>
+              {/* Bug Fix Toggle */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 14px',
+                  background: 'var(--bg-input)',
+                  borderRadius: 6,
+                  border: '1px solid var(--border-subtle)',
+                  marginTop: 10,
+                }}
+              >
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-primary)' }}>
-                      Is Bug Fix? (<code>fix</code>)
-                    </span>
-                    <FeatureTooltip featureName="fix" value={features.fix} />
-                  </div>
-                  <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                    Fixes have 3x higher historical recurrence probability.
-                  </span>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Is Bug Fix Commit? (fix)</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Historical bug fixes have 3x higher regression probability.</div>
                 </div>
+
                 <button
                   type="button"
                   onClick={() => handleSliderChange('fix', features.fix ? 0 : 1)}
                   style={{
                     padding: '6px 14px',
-                    borderRadius: 'var(--radius-sm)',
+                    borderRadius: 6,
                     fontWeight: 700,
                     fontSize: 12,
                     cursor: 'pointer',
-                    background: features.fix ? 'var(--risk-high-bg)' : 'var(--bg-input)',
+                    background: features.fix ? 'var(--risk-high-bg)' : 'var(--bg-card)',
                     border: features.fix ? '1px solid var(--risk-high)' : '1px solid var(--border-medium)',
                     color: features.fix ? 'var(--risk-high)' : 'var(--text-secondary)',
+                    transition: 'all 0.15s ease',
                   }}
                 >
-                  {features.fix ? 'YES (Fix Commit)' : 'NO (Feature/Refactor)'}
+                  {features.fix ? 'YES (Fix Commit)' : 'NO (Routine)'}
                 </button>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* Right Column: Live Verdict, CI/CD Gate, SHAP, and Blast Radius */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          
-          {/* Live Risk Gauge & CI/CD Gate Verdict */}
-          <div className="card" style={{ textAlign: 'center' }}>
-            <div className="card-header" style={{ justifyContent: 'center' }}>
-              <h3 className="card-title">Real-Time Risk Verdict</h3>
+        {/* RIGHT COLUMN: STICKY Real-Time Verdict Panel (Locked in viewport!) */}
+        <div style={{ position: 'sticky', top: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Card A: Verdict & CI/CD Gate */}
+          <div className="card" style={{ padding: 20, textAlign: 'center' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 }}>
+              Predicted Defect Risk
             </div>
 
-            <div style={{ margin: '16px auto' }}>
+            <div style={{ margin: '8px auto 14px' }}>
               <RiskGauge score={simData?.risk_score ?? 0} />
             </div>
 
-            {/* CI/CD Gate Banner */}
+            {/* Quality Gate Status Block */}
             {cicd && (
               <div
                 style={{
-                  padding: '14px 18px',
-                  borderRadius: 'var(--radius-md)',
+                  padding: '12px 14px',
+                  borderRadius: 8,
+                  textAlign: 'left',
                   background:
                     cicd.status === 'MERGE_BLOCKED'
-                      ? 'rgba(239, 68, 68, 0.12)'
+                      ? 'var(--risk-high-bg)'
                       : cicd.status === 'MANUAL_REVIEW_REQUIRED'
-                      ? 'rgba(234, 179, 8, 0.12)'
-                      : 'rgba(34, 197, 94, 0.12)',
-                  border:
+                      ? 'var(--risk-medium-bg)'
+                      : 'var(--risk-low-bg)',
+                  border: `1px solid ${
                     cicd.status === 'MERGE_BLOCKED'
-                      ? '1px solid rgba(239, 68, 68, 0.4)'
+                      ? 'rgba(239, 68, 68, 0.35)'
                       : cicd.status === 'MANUAL_REVIEW_REQUIRED'
-                      ? '1px solid rgba(234, 179, 8, 0.4)'
-                      : '1px solid rgba(34, 197, 94, 0.4)',
-                  textAlign: 'left',
-                  marginTop: 12,
+                      ? 'rgba(234, 179, 8, 0.35)'
+                      : 'rgba(34, 197, 94, 0.35)'
+                  }`,
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 16 }}>
-                    {cicd.status === 'MERGE_BLOCKED' ? 'BLOCKED' : cicd.status === 'MANUAL_REVIEW_REQUIRED' ? 'REVIEW REQUIRED' : 'PASSED'}
-                  </span>
-                  <strong
+                  <span
                     style={{
-                      color:
-                        cicd.status === 'MERGE_BLOCKED'
-                          ? 'var(--risk-high)'
-                          : cicd.status === 'MANUAL_REVIEW_REQUIRED'
-                          ? 'var(--risk-medium)'
-                          : 'var(--risk-low)',
-                      fontSize: 13,
+                      fontSize: 11,
+                      fontWeight: 800,
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      background: cicd.status === 'MERGE_BLOCKED' ? 'var(--risk-high)' : cicd.status === 'MANUAL_REVIEW_REQUIRED' ? 'var(--risk-medium)' : 'var(--risk-low)',
+                      color: '#ffffff',
                     }}
                   >
+                    {cicd.status === 'MERGE_BLOCKED' ? 'GATE BLOCKED' : cicd.status === 'MANUAL_REVIEW_REQUIRED' ? 'REVIEW REQUIRED' : 'GATE PASSED'}
+                  </span>
+                  <strong style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>
                     {cicd.headline}
                   </strong>
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
                   {cicd.reason}
                 </div>
               </div>
             )}
 
-            {/* Blast Radius Metrics */}
+            {/* Compact Blast Radius Summary */}
             {blast && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 16 }}>
-                <div style={{ background: 'var(--bg-page)', padding: '10px 8px', borderRadius: 'var(--radius-sm)' }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--risk-high)' }}>
-                    {blast.directly_modified_count}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Files Touched</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 14 }}>
+                <div style={{ background: 'var(--bg-input)', padding: '8px', borderRadius: 6 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace' }}>{blast.directly_modified_count}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Direct Files</div>
                 </div>
-                <div style={{ background: 'var(--bg-page)', padding: '10px 8px', borderRadius: 'var(--radius-sm)' }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent-cyan)' }}>
-                    {blast.impacted_downstream_count}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>AST Dependencies</div>
+                <div style={{ background: 'var(--bg-input)', padding: '8px', borderRadius: 6 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace' }}>{blast.impacted_downstream_count}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Downstream Modules</div>
                 </div>
-                <div style={{ background: 'var(--bg-page)', padding: '10px 8px', borderRadius: 'var(--radius-sm)' }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>
-                    {blast.total_affected_modules}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Blast Reach</div>
+                <div style={{ background: 'var(--bg-input)', padding: '8px', borderRadius: 6 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace' }}>{blast.total_affected_modules}</div>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>Total Reach</div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Actionable Developer Recommendations */}
-          {simData?.recommendations && (
-            <div className="card">
-              <div className="card-header" style={{ marginBottom: 12 }}>
-                <h3 className="card-title">💡 Actionable Remediation Steps</h3>
-                <span className="card-subtitle">Steps to reduce risk before opening PR</span>
-              </div>
-              <ul style={{ paddingLeft: 18, margin: 0 }}>
-                {simData.recommendations.map((rec, i) => (
-                  <li key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.4 }}>
-                    {rec}
-                  </li>
-                ))}
-              </ul>
+          {/* Card B: Tabbed Insights (TreeSHAP Drivers vs Actionable Remediation) */}
+          <div className="card" style={{ padding: 18 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 14, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10 }}>
+              <button
+                type="button"
+                className={`chip ${insightTab === 'shap' ? 'active' : ''}`}
+                onClick={() => setInsightTab('shap')}
+                style={{ borderRadius: 6, padding: '4px 10px', fontSize: 11.5, fontWeight: 600 }}
+              >
+                🔍 Top Risk Drivers ({shapExplanations.length})
+              </button>
+              <button
+                type="button"
+                className={`chip ${insightTab === 'remediation' ? 'active' : ''}`}
+                onClick={() => setInsightTab('remediation')}
+                style={{ borderRadius: 6, padding: '4px 10px', fontSize: 11.5, fontWeight: 600 }}
+              >
+                💡 Actionable Next Steps ({recommendations.length})
+              </button>
             </div>
-          )}
 
-          {/* TreeSHAP Factor Explanations */}
-          <ShapCard explanations={result?.shap_explanations || []} />
+            {insightTab === 'shap' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+                {shapExplanations.length > 0 ? (
+                  shapExplanations.slice(0, 5).map((exp, idx) => (
+                    <ShapCard key={idx} explanation={exp} />
+                  ))
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: 12 }}>
+                    No risk drivers flagged.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {recommendations.length > 0 ? (
+                  recommendations.map((rec, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--text-secondary)',
+                        lineHeight: 1.45,
+                        padding: '8px 10px',
+                        borderRadius: 6,
+                        background: 'var(--bg-input)',
+                        borderLeft: '3px solid var(--accent-primary)',
+                      }}
+                    >
+                      {rec}
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ fontSize: 12, color: 'var(--risk-low)', padding: '10px 12px', background: 'var(--risk-low-bg)', borderRadius: 6, border: '1px solid rgba(34, 197, 94, 0.25)' }}>
+                    ✅ Change scope is clean and well-scoped. Safe to merge under standard review.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

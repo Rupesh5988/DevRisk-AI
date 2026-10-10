@@ -1,8 +1,8 @@
 // ============================================================
 // DevRisk AI — Feature Definitions & Value Interpretation Engine
 // ============================================================
-// Plain-English definitions, risk rationale, and dynamic value
-// interpreters for all 28 machine learning metrics (14 raw + 14 engineered).
+// Simple, technical, crisp definitions and actionable guidance
+// for all 28 machine learning metrics (14 raw + 14 engineered).
 // ============================================================
 
 export const FEATURE_CATEGORIES = {
@@ -11,28 +11,28 @@ export const FEATURE_CATEGORIES = {
     name: 'Code Churn & Size',
     icon: '📝',
     color: '#3b82f6',
-    description: 'Volume and density of code modifications introduced by this pull request.',
+    description: 'Volume and density of code modifications in this pull request.',
   },
   architecture: {
     id: 'architecture',
-    name: 'Architectural Spread & Dispersion',
+    name: 'Architectural Spread',
     icon: '🏛️',
     color: '#8b5cf6',
-    description: 'How widely the code changes touch different files, directories, and architectural subsystems.',
+    description: 'How widely modifications touch different files, folders, and subsystems.',
   },
   developer: {
     id: 'developer',
-    name: 'Developer Context & Familiarity',
+    name: 'Contributor Experience',
     icon: '👤',
     color: '#10b981',
-    description: 'Author experience level and prior familiarity with the modified code modules.',
+    description: 'Author familiarity with this repository and the modified components.',
   },
   stability: {
     id: 'stability',
-    name: 'Code Stability & Historical Fragility',
+    name: 'Code Stability & History',
     icon: '🛡️',
     color: '#f59e0b',
-    description: 'Historical defect records, file age, and previous modification frequency.',
+    description: 'Historical defect frequency, file age, and previous modification history.',
   },
 };
 
@@ -45,14 +45,14 @@ export const FEATURE_DEFINITIONS = {
     label: 'Lines Added',
     category: 'churn',
     unit: 'lines',
-    simpleDefinition: 'Total number of new lines of code added in this pull request.',
-    whyItMatters: 'Large additions introduce new logic and increase the surface area where regressions or bugs can hide.',
+    simpleDefinition: 'Total count of new lines added.',
+    whyItMatters: 'Large additions expand test surface and increase the chance of undetected bugs.',
     safeRange: '< 100 lines',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 50) return { rating: 'safe', label: 'Minimal', meaning: 'Very small change (+50 lines or less); easy to review and low risk.' };
-      if (num <= 250) return { rating: 'moderate', label: 'Moderate', meaning: 'Standard feature or refactor; manageable for a thorough review.' };
-      return { rating: 'risky', label: 'High Churn', meaning: `Large addition (+${num} lines); consider breaking into smaller, atomic pull requests.` };
+      if (num <= 50) return { rating: 'safe', label: 'Minimal', meaning: 'Small change (+50 lines or less). Quick to review with low defect risk.' };
+      if (num <= 250) return { rating: 'moderate', label: 'Moderate', meaning: 'Standard feature or refactor; review logic thoroughly.' };
+      return { rating: 'risky', label: 'High Churn', meaning: `Large addition (+${num} lines). Break into smaller, atomic PRs to simplify review.` };
     },
   },
   ld: {
@@ -60,14 +60,14 @@ export const FEATURE_DEFINITIONS = {
     label: 'Lines Deleted',
     category: 'churn',
     unit: 'lines',
-    simpleDefinition: 'Total number of lines removed from existing files.',
-    whyItMatters: 'Deleting code can inadvertently break implicit dependencies, callers, or undocumented edge cases.',
+    simpleDefinition: 'Total count of lines removed from existing files.',
+    whyItMatters: 'Deleting code can break undocumented callers, internal APIs, or edge-case handling.',
     safeRange: '< 80 lines',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 30) return { rating: 'safe', label: 'Low', meaning: 'Minor cleanup or removal of dead code.' };
-      if (num <= 150) return { rating: 'moderate', label: 'Moderate', meaning: 'Noticeable code removal; verify that all callers and unit tests still pass.' };
-      return { rating: 'risky', label: 'Heavy Deletion', meaning: `Substantial deletions (-${num} lines); high risk of breaking dependent functions.` };
+      if (num <= 30) return { rating: 'safe', label: 'Low', meaning: 'Light deletion. Routine cleanup of unused or redundant code.' };
+      if (num <= 150) return { rating: 'moderate', label: 'Moderate', meaning: 'Noticeable deletions; verify all callers and test cases still pass.' };
+      return { rating: 'risky', label: 'Heavy Deletion', meaning: `Substantial deletions (-${num} lines). High risk of breaking dependent callers.` };
     },
   },
   lt: {
@@ -75,14 +75,14 @@ export const FEATURE_DEFINITIONS = {
     label: 'Lines in Modified Files',
     category: 'churn',
     unit: 'lines',
-    simpleDefinition: 'Total combined lines of code inside the files touched by this PR.',
-    whyItMatters: 'Modifying massive files ("God classes") carries higher blast radius and ripple-effect risks.',
+    simpleDefinition: 'Total combined lines across all touched files.',
+    whyItMatters: 'Large files ("God classes") have tighter coupling and wider blast radius when modified.',
     safeRange: '< 1,500 lines',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 600) return { rating: 'safe', label: 'Compact Files', meaning: 'Changes are within small, well-bounded modules with localized scope.' };
-      if (num <= 2500) return { rating: 'moderate', label: 'Medium Files', meaning: 'Average-sized modules; standard blast radius.' };
-      return { rating: 'risky', label: 'Monolithic Files', meaning: `Modifying files spanning ${num.toLocaleString()} lines; high risk of unexpected side effects.` };
+      if (num <= 600) return { rating: 'safe', label: 'Compact Files', meaning: 'Modifications are inside small, well-bounded modules.' };
+      if (num <= 2500) return { rating: 'moderate', label: 'Medium Files', meaning: 'Standard module size with manageable blast radius.' };
+      return { rating: 'risky', label: 'Monolithic Files', meaning: `Touching files spanning ${num.toLocaleString()} lines. High risk of unintended side effects.` };
     },
   },
   churn_density: {
@@ -90,44 +90,44 @@ export const FEATURE_DEFINITIONS = {
     label: 'Churn Density',
     category: 'churn',
     unit: 'ratio',
-    simpleDefinition: 'Ratio of lines changed relative to the total lines in the touched files ((la + ld) / lt).',
-    whyItMatters: 'Rewriting a huge percentage of an existing file fundamentally alters its behavior and increases regression risks.',
+    simpleDefinition: 'Percentage of the file contents modified ((la + ld) / lt).',
+    whyItMatters: 'Rewriting a large percentage of an existing file fundamentally changes its behavior.',
     safeRange: '< 0.30 (30%)',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 0.20) return { rating: 'safe', label: 'Surgical', meaning: 'Surgical modification affecting only a small portion of the target files.' };
-      if (num <= 0.60) return { rating: 'moderate', label: 'Noticeable', meaning: 'Significant rewrite of the target files (20%–60% replaced).' };
-      return { rating: 'risky', label: 'Overhaul', meaning: 'Major overhaul; over 60% of the target files were rewritten.' };
+      if (num <= 0.20) return { rating: 'safe', label: 'Surgical', meaning: 'Surgical edit affecting only a small portion of target files.' };
+      if (num <= 0.60) return { rating: 'moderate', label: 'Noticeable', meaning: 'Significant rewrite (20%–60% of file contents changed).' };
+      return { rating: 'risky', label: 'Major Overhaul', meaning: 'Over 60% of target files rewritten. Requires full regression testing.' };
     },
   },
   la_ratio: {
     name: 'la_ratio',
-    label: 'Addition vs Deletion Ratio',
+    label: 'Addition Ratio',
     category: 'churn',
     unit: 'ratio',
-    simpleDefinition: 'Proportion of the total change that consists of new additions (la / (la + ld)).',
-    whyItMatters: 'Distinguishes purely additive PRs from refactorings or cleanups.',
+    simpleDefinition: 'Proportion of total changes that are new additions (la / (la + ld)).',
+    whyItMatters: 'Distinguishes purely additive new features from refactorings or code removals.',
     safeRange: 'Balanced (0.30 – 0.80)',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num >= 0.85) return { rating: 'moderate', label: 'Purely Additive', meaning: 'Almost all new code; verify test coverage for new execution paths.' };
-      if (num <= 0.20) return { rating: 'moderate', label: 'Mainly Deletions', meaning: 'Primarily removing code; verify no active features were removed.' };
-      return { rating: 'safe', label: 'Balanced Churn', meaning: 'Healthy balance between adding new code and refactoring existing code.' };
+      if (num >= 0.85) return { rating: 'moderate', label: 'Purely Additive', meaning: 'Primarily new code. Verify unit test coverage for new execution paths.' };
+      if (num <= 0.20) return { rating: 'moderate', label: 'Mainly Deletions', meaning: 'Primarily removing code. Verify no active features were broken.' };
+      return { rating: 'safe', label: 'Balanced Churn', meaning: 'Healthy balance between adding new code and refactoring existing logic.' };
     },
   },
   churn_per_file: {
     name: 'churn_per_file',
-    label: 'Average Churn Per File',
+    label: 'Churn Per File',
     category: 'churn',
     unit: 'lines/file',
-    simpleDefinition: 'Average number of modified lines per affected file ((la + ld) / nf).',
-    whyItMatters: 'Indicates whether changes are spread thinly across many files or heavily concentrated in a few.',
+    simpleDefinition: 'Average modified lines per affected file ((la + ld) / nf).',
+    whyItMatters: 'Shows whether changes are spread thinly or concentrated heavily into few files.',
     safeRange: '< 60 lines/file',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 40) return { rating: 'safe', label: 'Light per file', meaning: 'Modest modifications per file; easy for peer reviewers to inspect.' };
+      if (num <= 40) return { rating: 'safe', label: 'Light per file', meaning: 'Light changes per file. Fast and straightforward to review.' };
       if (num <= 120) return { rating: 'moderate', label: 'Medium per file', meaning: 'Moderate alterations in each touched file.' };
-      return { rating: 'risky', label: 'Heavy per file', meaning: `Average of ${Math.round(num)} lines changed per file; high reviewer cognitive load.` };
+      return { rating: 'risky', label: 'Heavy per file', meaning: `Average ${Math.round(num)} lines changed per file. High cognitive load for reviewers.` };
     },
   },
   churn_asymmetry: {
@@ -135,32 +135,32 @@ export const FEATURE_DEFINITIONS = {
     label: 'Churn Asymmetry',
     category: 'churn',
     unit: 'ratio',
-    simpleDefinition: 'Magnitude of difference between additions and deletions (|la - ld| / (la + ld)).',
-    whyItMatters: 'Extreme asymmetry indicates either pure addition of new functionality or wholesale removal of old modules.',
+    simpleDefinition: 'Difference between additions and deletions (|la - ld| / (la + ld)).',
+    whyItMatters: 'Extreme asymmetry highlights either large new subsystems or large module removals.',
     safeRange: '0.20 – 0.70',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 0.40) return { rating: 'safe', label: 'Symmetric Refactor', meaning: 'Equal lines added and removed; typical of steady-state refactoring.' };
-      return { rating: 'moderate', label: 'Asymmetric', meaning: 'One-sided change; either introducing large logic or pruning large blocks.' };
+      if (num <= 0.40) return { rating: 'safe', label: 'Symmetric Refactor', meaning: 'Balanced additions and deletions; typical of routine refactoring.' };
+      return { rating: 'moderate', label: 'Asymmetric Change', meaning: 'One-sided change; either introduces new logic or prunes large blocks.' };
     },
   },
 
   // ------------------------------------------------------------
-  // 2. Architectural Footprint & Dispersion Features
+  // 2. Architectural Spread Features
   // ------------------------------------------------------------
   nf: {
     name: 'nf',
     label: 'Files Modified',
     category: 'architecture',
     unit: 'files',
-    simpleDefinition: 'Total count of distinct files modified in this pull request.',
-    whyItMatters: 'Touching many files expands the review surface and increases cross-module regression probability.',
+    simpleDefinition: 'Total count of distinct files modified.',
+    whyItMatters: 'Touching many files expands review scope and increases cross-file regression risk.',
     safeRange: '1 – 4 files',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 3) return { rating: 'safe', label: 'Focused', meaning: `Touches only ${num} file(s); localized and easy to test.` };
-      if (num <= 8) return { rating: 'moderate', label: 'Multi-file', meaning: `Touches ${num} files; requires cross-file review attention.` };
-      return { rating: 'risky', label: 'Wide Footprint', meaning: `Touches ${num} files; high complexity with widespread impact.` };
+      if (num <= 3) return { rating: 'safe', label: 'Focused', meaning: `Touches only ${num} file(s); localized and easy to verify.` };
+      if (num <= 8) return { rating: 'moderate', label: 'Multi-file', meaning: `Touches ${num} files; requires cross-file review diligence.` };
+      return { rating: 'risky', label: 'Wide Footprint', meaning: `Touches ${num} files. Broad change surface; consider splitting into focused PRs.` };
     },
   },
   nd: {
@@ -168,14 +168,14 @@ export const FEATURE_DEFINITIONS = {
     label: 'Directories Touched',
     category: 'architecture',
     unit: 'directories',
-    simpleDefinition: 'Number of distinct folders/directories containing modified files.',
-    whyItMatters: 'Changes that cross folder boundaries often cross architectural layers (e.g., UI, backend, database).',
+    simpleDefinition: 'Count of distinct folders containing modified files.',
+    whyItMatters: 'Cross-folder changes often span architectural layers (e.g., API, DB, UI).',
     safeRange: '1 – 2 directories',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 1) return { rating: 'safe', label: 'Single Directory', meaning: 'Changes are strictly confined to a single directory package.' };
-      if (num <= 3) return { rating: 'moderate', label: 'Multi-Folder', meaning: `Touches ${num} distinct directories.` };
-      return { rating: 'risky', label: 'Scattered', meaning: `Modifications touch ${num} directories; crosses package boundaries.` };
+      if (num <= 1) return { rating: 'safe', label: 'Single Folder', meaning: 'Changes are strictly confined to a single directory package.' };
+      if (num <= 3) return { rating: 'moderate', label: 'Multi-Folder', meaning: `Touches ${num} directories. Crosses package boundaries.` };
+      return { rating: 'risky', label: 'Scattered Folders', meaning: `Modifications touch ${num} directories. High architectural spread.` };
     },
   },
   ns: {
@@ -183,29 +183,29 @@ export const FEATURE_DEFINITIONS = {
     label: 'Subsystems Modified',
     category: 'architecture',
     unit: 'subsystems',
-    simpleDefinition: 'Count of top-level modules/subsystems affected by this pull request.',
-    whyItMatters: 'Cross-subsystem pull requests break modular boundaries and have the highest rate of defect escapes.',
+    simpleDefinition: 'Count of top-level architectural subsystems modified.',
+    whyItMatters: 'Cross-subsystem PRs cross domain boundaries and have the highest defect escape rate.',
     safeRange: '1 subsystem',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 1) return { rating: 'safe', label: 'Single Subsystem', meaning: 'Localized within one architectural domain.' };
-      if (num === 2) return { rating: 'moderate', label: 'Cross-Domain', meaning: 'Touches 2 subsystems; ensure contract interfaces are preserved.' };
-      return { rating: 'risky', label: 'Broad Architectural Spread', meaning: `Spans ${num} subsystems; high likelihood of contract violations.` };
+      if (num <= 1) return { rating: 'safe', label: 'Single Subsystem', meaning: 'Contained within one domain. Interface contracts are safe.' };
+      if (num === 2) return { rating: 'moderate', label: 'Cross-Domain', meaning: 'Touches 2 subsystems; verify inter-module contracts remain intact.' };
+      return { rating: 'risky', label: 'Broad Subsystem Spread', meaning: `Spans ${num} subsystems. High risk of breaking service contracts.` };
     },
   },
   entropy: {
     name: 'entropy',
-    label: 'Change Entropy (Dispersion)',
+    label: 'Change Entropy',
     category: 'architecture',
-    unit: 'bits (0.0 – 1.0)',
-    simpleDefinition: 'Measures how unevenly distributed modifications are across the touched files.',
-    whyItMatters: 'High entropy means changes are scattered haphazardly; low entropy means changes are cleanly concentrated.',
+    unit: 'score (0.0 – 2.5)',
+    simpleDefinition: 'How evenly modifications are scattered across touched files.',
+    whyItMatters: 'High entropy means changes are scattered randomly; low entropy means changes are focused.',
     safeRange: '< 0.50',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 0.35) return { rating: 'safe', label: 'Orderly / Concentrated', meaning: 'Changes are concentrated orderly within primary target files.' };
-      if (num <= 0.70) return { rating: 'moderate', label: 'Moderate Scatter', meaning: 'Changes are moderately distributed across files.' };
-      return { rating: 'risky', label: 'Scattered Modifications', meaning: 'Modifications are dispersed irregularly across files; hard to track.' };
+      if (num <= 0.35) return { rating: 'safe', label: 'Concentrated', meaning: 'Changes are concentrated cleanly within primary target files.' };
+      if (num <= 0.70) return { rating: 'moderate', label: 'Moderate Scatter', meaning: 'Changes are moderately distributed across multiple files.' };
+      return { rating: 'risky', label: 'Scattered Edits', meaning: 'Edits are scattered across files; hard to track and easy to miss bugs.' };
     },
   },
   diffusion_factor: {
@@ -213,14 +213,14 @@ export const FEATURE_DEFINITIONS = {
     label: 'Diffusion Factor',
     category: 'architecture',
     unit: 'score',
-    simpleDefinition: 'Composite metric of directory and subsystem spread normalized by file count ((nd * ns) / (nf + 1)).',
-    whyItMatters: 'Identifies changes that touch very few files but scatter them across opposing ends of the architecture.',
+    simpleDefinition: 'Directory and subsystem spread normalized by file count ((nd * ns) / (nf + 1)).',
+    whyItMatters: 'Catches changes that touch few files but scatter them across opposing ends of the system.',
     safeRange: '< 1.5',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 1.0) return { rating: 'safe', label: 'Cohesive', meaning: 'Files belong to logically co-located modules.' };
-      if (num <= 2.5) return { rating: 'moderate', label: 'Diffused', meaning: 'Noticeable architectural diffusion across folders.' };
-      return { rating: 'risky', label: 'Highly Diffused', meaning: 'High cross-cutting footprint; multiple layer interactions.' };
+      if (num <= 1.0) return { rating: 'safe', label: 'Cohesive', meaning: 'Files belong to closely related, co-located packages.' };
+      if (num <= 2.5) return { rating: 'moderate', label: 'Diffused', meaning: 'Noticeable architectural spread across separate packages.' };
+      return { rating: 'risky', label: 'Highly Diffused', meaning: 'High cross-cutting footprint; touches opposing architectural boundaries.' };
     },
   },
   subsystem_entropy: {
@@ -228,149 +228,149 @@ export const FEATURE_DEFINITIONS = {
     label: 'Subsystem Entropy',
     category: 'architecture',
     unit: 'score',
-    simpleDefinition: 'Entropy normalized by the number of modified subsystems.',
-    whyItMatters: 'Detects whether architectural spread is planned or chaotic.',
+    simpleDefinition: 'Entropy normalized by the number of touched subsystems.',
+    whyItMatters: 'Identifies whether architectural spread is planned or haphazard.',
     safeRange: '< 0.40',
     interpretValue: (val) => {
       const num = Number(val) || 0;
       if (num <= 0.30) return { rating: 'safe', label: 'Structured', meaning: 'Clean subsystem boundary alignment.' };
-      return { rating: 'moderate', label: 'Complex Dispersion', meaning: 'Non-trivial spread across subsystem boundaries.' };
+      return { rating: 'moderate', label: 'Complex Spread', meaning: 'Non-trivial spread across subsystem boundaries.' };
     },
   },
   churn_intensity: {
     name: 'churn_intensity',
-    label: 'Churn Intensity',
+    label: 'Review Strain Index',
     category: 'architecture',
     unit: 'score',
     simpleDefinition: 'Total churn multiplied by entropy ((la + ld) * entropy).',
-    whyItMatters: 'Quantifies the total cognitive strain on the code reviewer.',
+    whyItMatters: 'Quantifies reviewer cognitive load. High volume combined with high scatter causes review fatigue.',
     safeRange: '< 150',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 80) return { rating: 'safe', label: 'Low Review Strain', meaning: 'Easy for reviewers to follow and verify.' };
-      if (num <= 300) return { rating: 'moderate', label: 'Moderate Strain', meaning: 'Requires dedicated review focus.' };
-      return { rating: 'risky', label: 'Intense Review Burden', meaning: 'High volume and high scatter; prime candidate for bugs to slip through.' };
+      if (num <= 80) return { rating: 'safe', label: 'Low Review Strain', meaning: 'Straightforward for reviewers to inspect and verify.' };
+      if (num <= 300) return { rating: 'moderate', label: 'Moderate Strain', meaning: 'Requires dedicated review focus and careful inspection.' };
+      return { rating: 'risky', label: 'High Review Burden', meaning: 'High volume and high scatter. Prime candidate for bugs slipping through.' };
     },
   },
 
   // ------------------------------------------------------------
-  // 3. Developer Experience & Familiarity Features
+  // 3. Contributor Experience Features
   // ------------------------------------------------------------
   exp: {
     name: 'exp',
-    label: 'Total Developer Experience',
+    label: 'Developer Commits',
     category: 'developer',
-    unit: 'prior commits',
-    simpleDefinition: 'Total number of commits the author previously contributed to this repository.',
-    whyItMatters: 'Experienced repository contributors are familiar with architectural conventions and edge cases.',
+    unit: 'commits',
+    simpleDefinition: 'Total lifetime commits the author has merged into this repository.',
+    whyItMatters: 'Experienced repository contributors know architectural conventions and edge cases.',
     safeRange: '> 30 commits',
     interpretValue: (val) => {
       const num = Number(val) || 0;
       if (num >= 50) return { rating: 'safe', label: 'Veteran', meaning: `Author is a veteran contributor with ${num} prior commits.` };
       if (num >= 10) return { rating: 'moderate', label: 'Established', meaning: `Author is familiar with the project (${num} prior commits).` };
-      return { rating: 'risky', label: 'New Contributor', meaning: `Author has few prior commits (${num}); extra code review diligence advised.` };
+      return { rating: 'risky', label: 'New Contributor', meaning: `Author has few prior commits (${num}). Request walkthrough with a core maintainer.` };
     },
   },
   rexp: {
     name: 'rexp',
-    label: 'Recent Experience',
+    label: 'Recent Commits',
     category: 'developer',
-    unit: 'weighted commits',
-    simpleDefinition: 'Time-decayed count of commits authored recently by the developer.',
-    whyItMatters: 'Recent activity ensures the developer is up-to-date with recent refactorings and library upgrades.',
+    unit: 'recent commits',
+    simpleDefinition: 'Time-weighted count of commits authored recently by the developer.',
+    whyItMatters: 'Recent activity ensures the author is familiar with current libraries and patterns.',
     safeRange: '> 10 recent',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num >= 15) return { rating: 'safe', label: 'Active', meaning: 'Author is currently active in the codebase; context is fresh.' };
-      if (num >= 5) return { rating: 'moderate', label: 'Moderate', meaning: 'Author has moderate recent commit velocity.' };
-      return { rating: 'risky', label: 'Cold Context', meaning: 'Author has not contributed recently; conventions may have evolved.' };
+      if (num >= 15) return { rating: 'safe', label: 'Active', meaning: 'Author is actively shipping code; context is fresh.' };
+      if (num >= 5) return { rating: 'moderate', label: 'Moderate Pace', meaning: 'Author has moderate recent commit velocity.' };
+      return { rating: 'risky', label: 'Cold Context', meaning: 'Author has not contributed recently. Check against current coding guidelines.' };
     },
   },
   sexp: {
     name: 'sexp',
-    label: 'Subsystem Experience',
+    label: 'Subsystem Commits',
     category: 'developer',
     unit: 'subsystem commits',
-    simpleDefinition: 'Number of prior commits the author made in this specific subsystem.',
-    whyItMatters: 'Domain-specific knowledge in the exact files being modified dramatically cuts defect rates.',
+    simpleDefinition: 'Prior commits the author made in this specific subsystem.',
+    whyItMatters: 'Domain-specific familiarity with modified modules dramatically reduces bug rates.',
     safeRange: '> 8 commits',
     interpretValue: (val) => {
       const num = Number(val) || 0;
       if (num >= 15) return { rating: 'safe', label: 'Domain Expert', meaning: 'Author has deep domain expertise in this specific subsystem.' };
       if (num >= 4) return { rating: 'moderate', label: 'Familiar', meaning: 'Author has touched this subsystem before.' };
-      return { rating: 'risky', label: 'First-Time Domain', meaning: 'Author has rarely or never touched this subsystem before.' };
+      return { rating: 'risky', label: 'New to Subsystem', meaning: 'Author is editing this subsystem for the first time. Request domain owner review.' };
     },
   },
   ndev: {
     name: 'ndev',
-    label: 'Prior Authors of Modified Files',
+    label: 'Prior Authors on Files',
     category: 'developer',
     unit: 'developers',
-    simpleDefinition: 'Number of distinct developers who previously modified these files.',
-    whyItMatters: 'Files modified by dozens of developers often suffer from code erosion and mixed design patterns ("too many cooks").',
+    simpleDefinition: 'Count of distinct developers who previously modified these files.',
+    whyItMatters: 'Files modified by many developers often suffer from mixed design patterns and code erosion.',
     safeRange: '< 8 developers',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 3) return { rating: 'safe', label: 'Strong Ownership', meaning: 'Few historical contributors; clear ownership and consistent style.' };
+      if (num <= 3) return { rating: 'safe', label: 'Strong Ownership', meaning: 'Few historical contributors. Clear ownership and consistent style.' };
       if (num <= 10) return { rating: 'moderate', label: 'Shared Ownership', meaning: 'Standard team shared ownership.' };
-      return { rating: 'risky', label: 'High Developer Turnover', meaning: `${num} prior developers touched these files; high risk of mixed paradigms.` };
+      return { rating: 'risky', label: 'High Turnover', meaning: `${num} prior authors touched these files. High risk of mixed paradigms.` };
     },
   },
   subsystem_familiarity: {
     name: 'subsystem_familiarity',
-    label: 'Subsystem Familiarity Ratio',
+    label: 'Subsystem Familiarity',
     category: 'developer',
     unit: 'ratio (sexp / exp)',
-    simpleDefinition: 'Percentage of the author’s total experience dedicated to this specific subsystem.',
-    whyItMatters: 'Shows if the author is working in their primary area of expertise or venturing outside.',
+    simpleDefinition: 'Share of author’s experience concentrated in this subsystem.',
+    whyItMatters: 'Shows if the author is working in their core domain or venturing outside.',
     safeRange: '> 0.25 (25%)',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num >= 0.40) return { rating: 'safe', label: 'Primary Focus', meaning: 'The author spends a large share of their time in this subsystem.' };
+      if (num >= 0.40) return { rating: 'safe', label: 'Core Domain', meaning: 'Author spends a large share of their time in this subsystem.' };
       if (num >= 0.15) return { rating: 'moderate', label: 'Secondary Focus', meaning: 'Moderate familiarity with this subsystem.' };
-      return { rating: 'risky', label: 'Unfamiliar Territory', meaning: 'Author is working in an unfamiliar area of the codebase.' };
+      return { rating: 'risky', label: 'Unfamiliar Domain', meaning: 'Author is working outside their primary area of expertise.' };
     },
   },
   recent_exp_ratio: {
     name: 'recent_exp_ratio',
-    label: 'Recent Experience Ratio',
+    label: 'Recent Velocity Ratio',
     category: 'developer',
     unit: 'ratio (rexp / exp)',
-    simpleDefinition: 'Proportion of total experience contributed in the recent past.',
-    whyItMatters: 'Ensures the developer’s knowledge is current and actively maintained.',
+    simpleDefinition: 'Proportion of total commits authored in recent sprints.',
+    whyItMatters: 'Confirms author knowledge is current and actively maintained.',
     safeRange: '> 0.20',
     interpretValue: (val) => {
       const num = Number(val) || 0;
       if (num >= 0.30) return { rating: 'safe', label: 'Recent Velocity', meaning: 'Author is actively shipping code in recent sprints.' };
-      return { rating: 'moderate', label: 'Historical Contributor', meaning: 'Much of author’s experience is older.' };
+      return { rating: 'moderate', label: 'Past Contributor', meaning: 'Most of author’s experience is from earlier repository history.' };
     },
   },
   exp_per_file: {
     name: 'exp_per_file',
     label: 'Experience Per File',
     category: 'developer',
-    unit: 'exp / (nf + 1)',
-    simpleDefinition: 'Author experience scaled against the number of files changed in this PR.',
-    whyItMatters: 'Large multi-file changes require greater senior developer context to execute safely.',
+    unit: 'ratio',
+    simpleDefinition: 'Author experience scaled against number of files changed (exp / (nf + 1)).',
+    whyItMatters: 'Large multi-file changes require greater senior context to merge safely.',
     safeRange: '> 5.0',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num >= 8.0) return { rating: 'safe', label: 'Well-Matched', meaning: 'Developer experience is well-matched to the scope of files changed.' };
-      return { rating: 'moderate', label: 'High Scope for Experience', meaning: 'Broad scope of files relative to developer experience.' };
+      if (num >= 8.0) return { rating: 'safe', label: 'Well-Matched', meaning: 'Author experience matches the scope of files modified.' };
+      return { rating: 'moderate', label: 'Broad Scope', meaning: 'Broad scope of files relative to author experience level.' };
     },
   },
   exp_vs_complexity: {
     name: 'exp_vs_complexity',
-    label: 'Experience vs. Complexity',
+    label: 'Experience vs Complexity',
     category: 'developer',
     unit: 'ratio',
-    simpleDefinition: 'Balances developer experience against change dispersion and entropy.',
-    whyItMatters: 'Highly scattered changes made by less experienced authors represent the highest statistical risk quadrant.',
+    simpleDefinition: 'Balances author experience against change dispersion and entropy.',
+    whyItMatters: 'Scattered changes by junior authors represent the highest statistical risk quadrant.',
     safeRange: '> 10.0',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num >= 15.0) return { rating: 'safe', label: 'High Competency Margin', meaning: 'Strong experience buffer against change complexity.' };
-      return { rating: 'risky', label: 'Low Experience Buffer', meaning: 'Complex scattered change relative to author experience.' };
+      if (num >= 15.0) return { rating: 'safe', label: 'Strong Margin', meaning: 'Strong experience buffer against change complexity.' };
+      return { rating: 'risky', label: 'Low Experience Buffer', meaning: 'Complex scattered change relative to author experience. Pair with senior engineer.' };
     },
   },
 
@@ -379,91 +379,91 @@ export const FEATURE_DEFINITIONS = {
   // ------------------------------------------------------------
   fix: {
     name: 'fix',
-    label: 'Is Bug Fix Commit',
+    label: 'Bug Fix Commit',
     category: 'stability',
-    unit: 'boolean (0 or 1)',
-    simpleDefinition: 'Flag indicating whether this pull request is intended to fix an existing defect.',
-    whyItMatters: 'Historical studies show that bug fixes are 2x to 3x more likely to introduce secondary regression bugs than feature commits.',
+    unit: 'boolean',
+    simpleDefinition: 'Whether this pull request is intended to fix an existing defect.',
+    whyItMatters: 'Bug fixes are 2x to 3x more likely to introduce secondary regression bugs than feature work.',
     safeRange: '0 (Feature / Improvement)',
     interpretValue: (val) => {
       const num = Number(val) || 0;
       if (num === 1 || val === true) {
-        return { rating: 'risky', label: 'Bug Fix (High Recurrence Risk)', meaning: 'This PR fixes an existing bug; beware of secondary regression bugs ("fix-inducing commits").' };
+        return { rating: 'risky', label: 'Bug Fix', meaning: 'Fixes an existing bug. Check for secondary regressions ("fix-inducing commits").' };
       }
-      return { rating: 'safe', label: 'New Feature / Task', meaning: 'Standard feature or enhancement commit; baseline defect probability.' };
+      return { rating: 'safe', label: 'Feature / Enhancement', meaning: 'Standard feature or task. Baseline defect probability.' };
     },
   },
   age: {
     name: 'age',
-    label: 'Average File Age',
+    label: 'File Dormancy',
     category: 'stability',
     unit: 'days',
-    simpleDefinition: 'Average time in days since the modified files were last touched.',
-    whyItMatters: 'Modifying dormant files that haven’t been changed in months or years frequently reactivates latent bugs.',
+    simpleDefinition: 'Average days since modified files were last touched.',
+    whyItMatters: 'Modifying dormant code that hasn’t changed in months frequently breaks obsolete assumptions.',
     safeRange: '< 90 days',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 45) return { rating: 'safe', label: 'Active Code', meaning: 'Recently touched code; tests and context are current.' };
-      if (num <= 180) return { rating: 'moderate', label: 'Medium Age', meaning: `Files have not changed for ~${Math.round(num)} days.` };
-      return { rating: 'risky', label: 'Dormant Legacy Code', meaning: `Files were dormant for ${Math.round(num)} days; high risk of breaking obsolete assumptions.` };
+      if (num <= 45) return { rating: 'safe', label: 'Active Code', meaning: 'Recently touched code (<45 days). Tests and context are current.' };
+      if (num <= 180) return { rating: 'moderate', label: 'Medium Dormancy', meaning: `Files have not changed for ~${Math.round(num)} days.` };
+      return { rating: 'risky', label: 'Legacy Code', meaning: `Files were dormant for ${Math.round(num)} days. High risk of breaking hidden assumptions.` };
     },
   },
   nuc: {
     name: 'nuc',
-    label: 'Number of Unique Changes',
+    label: 'Historical Changes',
     category: 'stability',
     unit: 'prior revisions',
-    simpleDefinition: 'Total count of historical modifications the touched files have undergone.',
-    whyItMatters: 'Files with high historical change frequency are hot spots ("bug hotspots") in the system.',
-    safeRange: '< 25 prior revisions',
+    simpleDefinition: 'Total count of historical modifications touched files have undergone.',
+    whyItMatters: 'Files with high change frequency are code hotspots with recurring defect history.',
+    safeRange: '< 25 revisions',
     interpretValue: (val) => {
       const num = Number(val) || 0;
       if (num <= 15) return { rating: 'safe', label: 'Stable Files', meaning: 'Historically stable files with few past revisions.' };
-      if (num <= 50) return { rating: 'moderate', label: 'Active Revision', meaning: 'Moderately revised files.' };
-      return { rating: 'risky', label: 'Volatile Hotspot', meaning: `High-churn hotspot (${num} past revisions); known defect concentration area.` };
+      if (num <= 50) return { rating: 'moderate', label: 'Active Revision', meaning: 'Moderately revised files with standard change history.' };
+      return { rating: 'risky', label: 'Volatile Hotspot', meaning: `Hotspot code (${num} past revisions). Known defect concentration area.` };
     },
   },
   fragility_index: {
     name: 'fragility_index',
     label: 'File Fragility Index',
     category: 'stability',
-    unit: 'index score',
-    simpleDefinition: 'Compound index combining file dormancy and historical change frequency scaled against experience ((age * nuc) / (exp + 1)).',
-    whyItMatters: 'Pinpoints modifications where unfamiliar developers touch old, volatile legacy files.',
+    unit: 'score',
+    simpleDefinition: 'Combines file dormancy and change frequency scaled against experience ((age * nuc) / (exp + 1)).',
+    whyItMatters: 'Pinpoints edits where unfamiliar developers touch old, volatile legacy files.',
     safeRange: '< 50.0',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 25.0) return { rating: 'safe', label: 'Low Fragility', meaning: 'Changes are within well-maintained, resilient code.' };
-      if (num <= 100.0) return { rating: 'moderate', label: 'Moderate Fragility', meaning: 'Contains legacy or hotspot code elements.' };
-      return { rating: 'risky', label: 'High Fragility', meaning: 'Modifying fragile legacy code; high regression probability.' };
+      if (num <= 25.0) return { rating: 'safe', label: 'Low Fragility', meaning: 'Modifications are within resilient, well-maintained code.' };
+      if (num <= 100.0) return { rating: 'moderate', label: 'Moderate Fragility', meaning: 'Touches code with legacy or hotspot elements.' };
+      return { rating: 'risky', label: 'High Fragility', meaning: 'Modifying fragile legacy code. High regression probability; verify edge cases.' };
     },
   },
   dev_density_risk: {
     name: 'dev_density_risk',
-    label: 'Developer Density Risk',
+    label: 'Author Turnover Rate',
     category: 'stability',
-    unit: 'ratio (ndev / (age + 1))',
-    simpleDefinition: 'Ratio of developer turnover relative to file age.',
-    whyItMatters: 'Files edited by many different developers in a short timeframe exhibit the highest bug density.',
+    unit: 'ratio',
+    simpleDefinition: 'Ratio of developer turnover relative to file age (ndev / (age + 1)).',
+    whyItMatters: 'Files edited by many different developers in a short timeframe exhibit highest defect density.',
     safeRange: '< 0.15',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 0.10) return { rating: 'safe', label: 'Low Contention', meaning: 'Healthy ownership turnover over time.' };
-      return { rating: 'moderate', label: 'High Contention', meaning: 'Multiple developers rapidly modifying the same files.' };
+      if (num <= 0.10) return { rating: 'safe', label: 'Stable Ownership', meaning: 'Healthy ownership turnover over time.' };
+      return { rating: 'moderate', label: 'High Turnover', meaning: 'Multiple developers rapidly modifying the same files without clear owner.' };
     },
   },
   rexp_vs_sexp: {
     name: 'rexp_vs_sexp',
-    label: 'Recent vs. Subsystem Velocity',
+    label: 'Recent vs Subsystem Pace',
     category: 'stability',
-    unit: 'ratio ((rexp + 1) / (sexp + 1))',
-    simpleDefinition: 'Comparison of author’s overall recent pace against their specific subsystem footprint.',
-    whyItMatters: 'Highlights generalist velocity vs specialist focus.',
+    unit: 'ratio',
+    simpleDefinition: 'Comparison of author’s overall recent activity against their subsystem experience.',
+    whyItMatters: 'Highlights generalist pace vs domain specialist focus.',
     safeRange: '0.5 – 2.0',
     interpretValue: (val) => {
       const num = Number(val) || 0;
-      if (num <= 2.0) return { rating: 'safe', label: 'Grounded Velocity', meaning: 'Recent activity aligns with domain history.' };
-      return { rating: 'moderate', label: 'Rapid Pivot', meaning: 'Author is currently switching into this subsystem.' };
+      if (num <= 2.0) return { rating: 'safe', label: 'Grounded Pace', meaning: 'Recent activity aligns with subsystem experience.' };
+      return { rating: 'moderate', label: 'Domain Shift', meaning: 'Author is currently pivoting into this subsystem.' };
     },
   },
 };

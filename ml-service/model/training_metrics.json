@@ -1,23 +1,23 @@
 {
-  "auc_roc": 0.8666,
-  "pr_auc": 0.661,
-  "brier_score": 0.116,
-  "accuracy": 0.8218,
-  "f1_score": 0.5686,
-  "precision": 0.4707,
-  "recall": 0.718,
-  "decision_threshold": 0.48,
-  "cost_reduction_pct": 0.82,
+  "auc_roc": 0.8665,
+  "pr_auc": 0.6613,
+  "brier_score": 0.1156,
+  "accuracy": 0.8262,
+  "f1_score": 0.5711,
+  "precision": 0.4788,
+  "recall": 0.7077,
+  "decision_threshold": 0.49,
+  "cost_reduction_pct": 0.35,
   "test_size": 21335,
   "test_buggy_count": 3489,
   "confusion_matrix": [
     [
-      15029,
-      2817
+      15158,
+      2688
     ],
     [
-      984,
-      2505
+      1020,
+      2469
     ]
   ],
   "feature_columns": [
@@ -50,8 +50,8 @@
     "subsystem_entropy",
     "rexp_vs_sexp"
   ],
-  "training_date": "2026-09-04T20:50:33.045713",
-  "cv_auc_roc_mean": 0.8521,
-  "cv_auc_roc_std": 0.0229,
-  "train_minimized_cost": 5566.0
+  "training_date": "2026-10-10T17:44:50.023241",
+  "cv_auc_roc_mean": 0.8525,
+  "cv_auc_roc_std": 0.0225,
+  "train_minimized_cost": 6253.0
 }

@@ -25,6 +25,7 @@ async function listRepos(req, res) {
         r.owner,
         r.language,
         r.created_at,
+        (r.access_token IS NOT NULL AND r.access_token != '') AS is_private,
         COUNT(pr.id) AS total_prs,
         COALESCE(ROUND(AVG(pr.risk_score)::numeric, 1), 0) AS avg_risk_score,
         COUNT(CASE WHEN pr.risk_label = 'HIGH' THEN 1 END) AS high_risk_count
@@ -45,20 +46,17 @@ async function listRepos(req, res) {
 /**
  * POST /api/repos
  *
- * Adds a new GitHub repository to track.
- * Validates the repo exists on GitHub before adding.
- *
- * Body: { github_url: "https://github.com/owner/repo" }
+ * Adds a new GitHub repository to track (Public or Private).
+ * Body: { github_url: "https://github.com/owner/repo", access_token?: "ghp_xxx" }
  */
 async function addRepo(req, res) {
-  const { github_url } = req.body;
+  const { github_url, access_token } = req.body;
 
   if (!github_url) {
     return res.status(400).json({ error: 'github_url is required' });
   }
 
   // Parse owner and repo from the GitHub URL
-  // Accepts: https://github.com/owner/repo or github.com/owner/repo
   const urlPattern = /(?:https?:\/\/)?github\.com\/([^/]+)\/([^/]+)\/?$/;
   const match = github_url.match(urlPattern);
 
@@ -69,7 +67,9 @@ async function addRepo(req, res) {
   }
 
   const owner = match[1];
-  const repo = match[2].replace('.git', ''); // Remove .git suffix if present
+  const repo = match[2].replace('.git', '');
+
+  const cleanToken = access_token && access_token.trim() ? access_token.trim() : null;
 
   try {
     // Check if already tracked by THIS user
@@ -84,49 +84,63 @@ async function addRepo(req, res) {
       });
     }
 
-    // Verify the repository exists on GitHub with resilient fallback
+    // Verify the repository exists on GitHub with smart public/private detection
     let repoInfo;
-    try {
-      repoInfo = await githubService.getRepoInfo(owner, repo);
-    } catch (ghErr) {
-      console.warn(`[RepoController] GitHub lookup failed (${ghErr.message}), creating tracked entry with URL metadata`);
-      repoInfo = {
-        html_url: `https://github.com/${owner}/${repo}`,
-        language: 'JavaScript',
-      };
+    if (cleanToken) {
+      try {
+        repoInfo = await githubService.getRepoInfo(owner, repo, cleanToken);
+      } catch (ghErr) {
+        return res.status(400).json({
+          error: `Could not access private repository with provided token: ${ghErr.message}`,
+          token_invalid: true,
+          is_private: true,
+        });
+      }
+    } else {
+      try {
+        repoInfo = await githubService.getRepoInfo(owner, repo, null);
+      } catch (ghErr) {
+        return res.status(400).json({
+          error: 'This repository appears to be private or requires authentication.',
+          requires_token: true,
+          is_private: true,
+          message: 'Private repository detected. Please enter a Personal Access Token (PAT) with repo scope.',
+        });
+      }
     }
 
-    // Insert into database
+    // Insert into database with access_token
     const result = await pool.query(
-      `INSERT INTO repositories (user_id, github_url, name, owner, language)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO repositories (user_id, github_url, name, owner, language, access_token)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [req.user.id, repoInfo.html_url, repo, owner, repoInfo.language || null]
+      [req.user.id, repoInfo.html_url, repo, owner, repoInfo.language || null, cleanToken]
     );
 
-    console.log(`[RepoController] Repository added: ${owner}/${repo}`);
+    const newRepo = result.rows[0];
+    console.log(`[RepoController] Repository added: ${owner}/${repo} (Private: ${cleanToken ? 'YES' : 'NO'})`);
 
     // --- BACKGROUND SYNC ---
-    // Fetch the latest 5 PRs and process them in the background
-    // so the dashboard isn't empty immediately after adding.
     setTimeout(async () => {
       try {
         console.log(`[RepoController] Starting background sync for ${owner}/${repo}...`);
         const { processPullRequest } = require('./webhookController');
-        const recentPRs = await githubService.getRecentPRs(owner, repo, 5);
+        let recentPRs = await githubService.getRecentPRs(owner, repo, 100, cleanToken).catch(() => []);
+        if (!recentPRs || recentPRs.length === 0) {
+          recentPRs = await githubService.getRecentCommitsAsPRs(owner, repo, 100, cleanToken).catch(() => []);
+        }
         
         for (const pr of recentPRs) {
-          // Construct a mock webhook payload
           const mockPayload = {
             action: 'opened',
             pull_request: pr,
             repository: repoInfo,
           };
-          await processPullRequest(mockPayload, null).catch(err => {
+          await processPullRequest(mockPayload, newRepo.id).catch(err => {
              console.error(`[RepoController] Background sync failed for PR #${pr.number}:`, err.message);
           });
         }
-        console.log(`[RepoController] Background sync complete for ${owner}/${repo}`);
+        console.log(`[RepoController] Background sync complete for ${owner}/${repo} (${recentPRs.length} items synced)`);
       } catch (syncErr) {
         console.error(`[RepoController] Failed to start background sync:`, syncErr.message);
       }
@@ -154,7 +168,14 @@ async function getRepoById(req, res) {
   try {
     const result = await pool.query(
       `SELECT
-        r.*,
+        r.id,
+        r.user_id,
+        r.github_url,
+        r.name,
+        r.owner,
+        r.language,
+        r.created_at,
+        (r.access_token IS NOT NULL AND r.access_token != '') AS is_private,
         COUNT(pr.id) AS total_prs,
         COALESCE(ROUND(AVG(pr.risk_score)::numeric, 1), 0) AS avg_risk_score,
         COUNT(CASE WHEN pr.risk_label = 'HIGH' THEN 1 END) AS high_risk_count,
@@ -185,10 +206,11 @@ async function getRepoById(req, res) {
  */
 async function syncRepo(req, res) {
   const { id } = req.params;
+  const { access_token } = req.body || {};
 
   try {
     const result = await pool.query(
-      'SELECT owner, name FROM repositories WHERE id = $1 AND user_id = $2',
+      'SELECT id, owner, name, access_token FROM repositories WHERE id = $1 AND user_id = $2',
       [id, req.user.id]
     );
 
@@ -197,8 +219,44 @@ async function syncRepo(req, res) {
     }
 
     const { owner, name: repo } = result.rows[0];
+    let repoToken = result.rows[0].access_token;
+
+    // If an updated token was provided in the sync request, save it
+    if (access_token && access_token.trim()) {
+      repoToken = access_token.trim();
+      await pool.query(
+        'UPDATE repositories SET access_token = $1 WHERE id = $2',
+        [repoToken, id]
+      );
+      console.log(`[RepoController] Updated access token for ${owner}/${repo}`);
+    }
+
     const { processPullRequest } = require('./webhookController');
-    const recentPRs = await githubService.getRecentPRs(owner, repo, 10);
+    let recentPRs = [];
+    let isFromCommits = false;
+
+    try {
+      recentPRs = await githubService.getRecentPRs(owner, repo, 100, repoToken);
+    } catch (authErr) {
+      console.warn(`[RepoController] Auth error during getRecentPRs:`, authErr.message);
+      return res.status(401).json({ error: authErr.message });
+    }
+
+    // If 0 PRs found in GitHub's PR API, automatically fall back to recent commits & merge PRs!
+    if (!recentPRs || recentPRs.length === 0) {
+      try {
+        console.log(`[RepoController] 0 official GitHub PRs found for ${owner}/${repo}. Falling back to recent commits / merge PRs...`);
+        recentPRs = await githubService.getRecentCommitsAsPRs(owner, repo, 100, repoToken);
+        if (recentPRs && recentPRs.length > 0) {
+          isFromCommits = true;
+        }
+      } catch (commitErr) {
+        if (commitErr.message.includes('Authentication Failed') || commitErr.message.includes('Access Denied')) {
+          return res.status(401).json({ error: commitErr.message });
+        }
+        console.warn(`[RepoController] Commit sync fallback error:`, commitErr.message);
+      }
+    }
 
     const repoInfo = {
       html_url: `https://github.com/${owner}/${repo}`,
@@ -216,14 +274,25 @@ async function syncRepo(req, res) {
       };
       
       try {
-        await processPullRequest(mockPayload, null);
+        await processPullRequest(mockPayload, id);
         syncedCount++;
       } catch (err) {
         console.error(`[RepoController] Sync failed for PR #${pr.number}:`, err.message);
       }
     }
 
-    res.json({ message: `Successfully synced ${syncedCount} Pull Requests.` });
+    if (syncedCount === 0) {
+      return res.json({
+        message: 'No Pull Requests or Commits found in this repository. Ensure your PAT is valid and has "repo" scope.',
+        synced_count: 0
+      });
+    }
+
+    const syncMsg = isFromCommits
+      ? `Successfully synced and evaluated ${syncedCount} Pull Requests & Merged Commits.`
+      : `Successfully synced ${syncedCount} Pull Requests.`;
+
+    res.json({ message: syncMsg, synced_count: syncedCount });
   } catch (err) {
     console.error('[RepoController] Error syncing repo:', err.message);
     res.status(500).json({ error: 'Internal server error during sync' });
@@ -255,4 +324,128 @@ async function deleteRepo(req, res) {
   }
 }
 
-module.exports = { listRepos, addRepo, getRepoById, syncRepo, deleteRepo };
+/**
+ * POST /api/repos/check-visibility
+ *
+ * Probes GitHub to determine whether a repo is Public or Private.
+ * Body: { github_url: "owner/repo", access_token?: "ghp_xxx" }
+ */
+async function checkRepoVisibility(req, res) {
+  const { github_url, access_token } = req.body;
+  if (!github_url || !github_url.trim()) {
+    return res.status(400).json({ error: 'github_url is required' });
+  }
+
+  const trimmed = github_url.trim();
+  const urlPattern = /(?:https?:\/\/)?github\.com\/([^/]+)\/([^/]+)\/?$/;
+  let match = trimmed.match(urlPattern);
+  let owner, repo;
+  if (match) {
+    owner = match[1];
+    repo = match[2].replace(/\.git$/, '');
+  } else {
+    const shortMatch = trimmed.match(/^([^/\s]+)\/([^/\s]+)$/);
+    if (shortMatch) {
+      owner = shortMatch[1];
+      repo = shortMatch[2].replace(/\.git$/, '');
+    } else {
+      return res.status(400).json({ error: 'Invalid repository format' });
+    }
+  }
+
+  const cleanToken = access_token && access_token.trim() ? access_token.trim() : null;
+
+  // 1. Check anonymously first
+  try {
+    const pubInfo = await githubService.getRepoInfo(owner, repo, null);
+    return res.json({
+      is_private: false,
+      requires_token: false,
+      owner,
+      repo,
+      name: pubInfo.name || repo,
+      language: pubInfo.language,
+      stars: pubInfo.stargazers_count,
+      description: pubInfo.description,
+      message: 'Public repository detected. Ready to connect!',
+    });
+  } catch (pubErr) {
+    // 2. Anonymous failed (404/403) -> Private or requires token
+    if (cleanToken) {
+      try {
+        const privInfo = await githubService.getRepoInfo(owner, repo, cleanToken);
+        return res.json({
+          is_private: true,
+          requires_token: false,
+          token_valid: true,
+          owner,
+          repo,
+          name: privInfo.name || repo,
+          language: privInfo.language,
+          message: 'Private repository verified with Personal Access Token.',
+        });
+      } catch (tokErr) {
+        return res.json({
+          is_private: true,
+          requires_token: true,
+          token_valid: false,
+          error: 'Invalid Personal Access Token or repository not accessible.',
+        });
+      }
+    }
+
+    return res.json({
+      is_private: true,
+      requires_token: true,
+      owner,
+      repo,
+      message: 'Private repository detected. Personal Access Token (PAT) is required.',
+    });
+  }
+}
+
+/**
+ * PUT /api/repos/:id/token
+ *
+ * Updates the Personal Access Token for a tracked repository.
+ */
+async function updateRepoToken(req, res) {
+  const { id } = req.params;
+  const { access_token } = req.body;
+
+  const cleanToken = access_token && access_token.trim() ? access_token.trim() : null;
+
+  try {
+    const existing = await pool.query(
+      'SELECT id, owner, name FROM repositories WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Repository not found' });
+    }
+
+    const { owner, name: repo } = existing.rows[0];
+
+    // If a token is provided, verify it works against GitHub
+    if (cleanToken) {
+      try {
+        await githubService.getRepoInfo(owner, repo, cleanToken);
+      } catch (err) {
+        return res.status(400).json({ error: `Invalid GitHub token or repository inaccessible: ${err.message}` });
+      }
+    }
+
+    await pool.query(
+      'UPDATE repositories SET access_token = $1 WHERE id = $2',
+      [cleanToken, id]
+    );
+
+    res.json({ message: 'Personal Access Token updated successfully.' });
+  } catch (err) {
+    console.error('[RepoController] Error updating token:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+module.exports = { listRepos, addRepo, getRepoById, syncRepo, deleteRepo, checkRepoVisibility, updateRepoToken };

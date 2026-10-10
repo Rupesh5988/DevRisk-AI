@@ -1,55 +1,119 @@
 // ============================================================
-// Repositories Page
+// Repositories Page & Connect Modal — Clean, Modern & Ergonomic
 // ============================================================
-// Lists all tracked repos with stats, and provides a form
-// to add new repositories.
+// Provides a spacious 3-column repository grid with live search,
+// status badges, and an un-cluttered Connect Repository modal.
 // ============================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listRepos, addRepo, deleteRepo } from '../services/api';
+import { listRepos, addRepo, deleteRepo, checkRepoVisibility } from '../services/api';
 import { Trash2 } from 'lucide-react';
 
-function getRiskClass(score) {
-  if (score >= 70) return 'high';
-  if (score >= 40) return 'medium';
-  return 'low';
-}
-
-export default function Repositories() {
+export default function Repositories({ 
+  onRepoAdded = null, 
+  externalModalOpen = false, 
+  onCloseExternalModal = null 
+}) {
   const navigate = useNavigate();
   const [repos, setRepos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Modal & Add Repo State
+  const [localModalOpen, setLocalModalOpen] = useState(false);
+  const isModalOpen = externalModalOpen || localModalOpen;
+
   const [newUrl, setNewUrl] = useState('');
+  const [accessToken, setAccessToken] = useState('');
+  const [showTokenInput, setShowTokenInput] = useState(false);
+  const [visibilityStatus, setVisibilityStatus] = useState(null);
   const [addLoading, setAddLoading] = useState(false);
   const [addMessage, setAddMessage] = useState(null);
-  const [draggedIdx, setDraggedIdx] = useState(null);
+
+  const tokenInputRef = useRef(null);
+  const checkTimeoutRef = useRef(null);
 
   useEffect(() => {
     fetchRepos();
   }, []);
 
+  // Sync external modal state
+  const handleCloseModal = () => {
+    setLocalModalOpen(false);
+    if (onCloseExternalModal) onCloseExternalModal();
+    setNewUrl('');
+    setAccessToken('');
+    setVisibilityStatus(null);
+    setAddMessage(null);
+  };
+
+  // Automatic Public vs. Private Detection when user pastes or types repository
+  useEffect(() => {
+    if (checkTimeoutRef.current) {
+      clearTimeout(checkTimeoutRef.current);
+    }
+
+    const trimmed = newUrl.trim();
+    if (!trimmed) {
+      setVisibilityStatus(null);
+      return;
+    }
+
+    const isUrl = /(?:https?:\/\/)?github\.com\/[^/\s]+\/[^/\s]+/.test(trimmed);
+    const isShorthand = /^[^/\s]+\/[^/\s]+$/.test(trimmed);
+
+    if (!isUrl && !isShorthand) {
+      setVisibilityStatus(null);
+      return;
+    }
+
+    checkTimeoutRef.current = setTimeout(async () => {
+      try {
+        setVisibilityStatus({ checking: true });
+        const res = await checkRepoVisibility(trimmed, accessToken.trim() || null);
+        const data = res.data;
+        if (data.is_private) {
+          setVisibilityStatus({
+            checking: false,
+            is_private: true,
+            requires_token: data.requires_token,
+            token_valid: data.token_valid,
+            message: data.message || 'Private repository detected',
+          });
+          // Automatically prompt developer by opening and focusing PAT input
+          if (data.requires_token) {
+            setShowTokenInput(true);
+            setTimeout(() => tokenInputRef.current?.focus(), 150);
+          }
+        } else {
+          setVisibilityStatus({
+            checking: false,
+            is_private: false,
+            message: 'Public repository — no token required',
+          });
+          if (!accessToken) {
+            setShowTokenInput(false);
+          }
+        }
+      } catch (err) {
+        setVisibilityStatus(null);
+      }
+    }, 450);
+
+    return () => {
+      if (checkTimeoutRef.current) {
+        clearTimeout(checkTimeoutRef.current);
+      }
+    };
+  }, [newUrl, accessToken]);
+
   async function fetchRepos() {
     try {
       setLoading(true);
       const res = await listRepos();
-      let fetchedRepos = res.data.repositories || [];
-      
-      // Restore saved order
-      const savedOrder = JSON.parse(localStorage.getItem('devrisk_repos_order') || '[]');
-      if (savedOrder.length > 0) {
-        fetchedRepos.sort((a, b) => {
-          const aIdx = savedOrder.indexOf(a.id);
-          const bIdx = savedOrder.indexOf(b.id);
-          if (aIdx === -1 && bIdx === -1) return 0;
-          if (aIdx === -1) return 1;
-          if (bIdx === -1) return -1;
-          return aIdx - bIdx;
-        });
-      }
-
-      setRepos(fetchedRepos);
+      setRepos(res.data.repositories || []);
     } catch (err) {
       setError('Failed to load repositories');
     } finally {
@@ -57,238 +121,564 @@ export default function Repositories() {
     }
   }
 
-  const handleDelete = async (e, id) => {
+  const handleAddRepo = async (e) => {
+    e.preventDefault();
+    const trimmed = newUrl.trim();
+    if (!trimmed) return;
+
+    try {
+      setAddLoading(true);
+      setAddMessage(null);
+
+      const res = await addRepo(trimmed, accessToken.trim() || null);
+      setAddMessage({
+        type: 'success',
+        text: `✅ ${res.data.message || 'Repository connected successfully!'}`,
+      });
+
+      await fetchRepos();
+      if (onRepoAdded) onRepoAdded();
+
+      setTimeout(() => {
+        handleCloseModal();
+      }, 1200);
+    } catch (err) {
+      const errData = err.response?.data;
+      if (errData?.is_private && errData?.requires_token) {
+        setShowTokenInput(true);
+        setAddMessage({
+          type: 'warning',
+          text: '🔒 Private repository detected. Please enter a Personal Access Token (PAT).',
+        });
+      } else {
+        setAddMessage({
+          type: 'error',
+          text: `❌ ${errData?.error || 'Failed to add repository. Check URL or token.'}`,
+        });
+      }
+    } finally {
+      setAddLoading(false);
+    }
+  };
+
+  const handleDelete = async (e, id, name) => {
     e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this repository? This action cannot be undone.')) return;
+    if (!window.confirm(`Are you sure you want to disconnect ${name}? This will remove its tracked evaluations.`)) {
+      return;
+    }
     try {
       await deleteRepo(id);
-      setRepos(prev => prev.filter(r => r.id !== id));
+      setRepos((prev) => prev.filter((r) => r.id !== id));
+      if (onRepoAdded) onRepoAdded();
     } catch (err) {
       alert('Failed to delete repository');
     }
   };
 
-  const handleDragStart = (e, index) => {
-    setDraggedIdx(index);
-    e.dataTransfer.effectAllowed = 'move';
-  };
+  const filteredRepos = repos.filter((r) => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      r.name.toLowerCase().includes(q) ||
+      r.owner.toLowerCase().includes(q) ||
+      (r.language && r.language.toLowerCase().includes(q))
+    );
+  });
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
-  };
-
-  const handleDrop = (e, dropIdx) => {
-    e.preventDefault();
-    if (draggedIdx === null || draggedIdx === dropIdx) return;
-    
-    const newRepos = [...repos];
-    const draggedItem = newRepos[draggedIdx];
-    newRepos.splice(draggedIdx, 1);
-    newRepos.splice(dropIdx, 0, draggedItem);
-    
-    setRepos(newRepos);
-    setDraggedIdx(null);
-
-    const newOrderIds = newRepos.map(r => r.id);
-    localStorage.setItem('devrisk_repos_order', JSON.stringify(newOrderIds));
-  };
-
-  async function handleAddRepo(e) {
-    e.preventDefault();
-    if (!newUrl.trim()) return;
-
-    try {
-      setAddLoading(true);
-      setAddMessage(null);
-      const res = await addRepo(newUrl.trim());
-      setAddMessage({ type: 'success', text: `✅ ${res.data.message}` });
-      setNewUrl('');
-      fetchRepos(); // Refresh list
-    } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to add repository';
-      setAddMessage({ type: 'error', text: `❌ ${msg}` });
-    } finally {
-      setAddLoading(false);
-    }
-  }
-
-  if (loading) {
+  if (loading && repos.length === 0) {
     return (
       <div className="loading-container">
         <div className="spinner"></div>
-        <div className="loading-text">Loading repositories...</div>
+        <div className="loading-text">Loading monitored repositories...</div>
       </div>
     );
   }
 
   return (
-    <>
-      <div className="page-header">
-        <h1 className="page-title">Repositories</h1>
-
-      </div>
-
-      {/* Add Repository Form */}
-      <div className="card animate-in" style={{ marginBottom: 32 }}>
-        <div className="card-header">
-          <div>
-            <h3 className="card-title">Add Repository</h3>
-            <span className="card-subtitle">Connect a public or private GitHub repository for automated risk scoring</span>
-          </div>
-        </div>
-        <form onSubmit={handleAddRepo} style={{ display: 'flex', gap: 12 }}>
+    <div>
+      {/* Top Controls: Search Bar & Add Button */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 16,
+          marginBottom: 20,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
+          <span
+            style={{
+              position: 'absolute',
+              left: 12,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: 'var(--text-muted)',
+              fontSize: 14,
+            }}
+          >
+            🔍
+          </span>
           <input
             type="text"
             className="input-field"
-            placeholder="https://github.com/owner/repo or owner/repo"
-            value={newUrl}
-            onChange={(e) => setNewUrl(e.target.value)}
-            disabled={addLoading}
-            style={{ flex: 1 }}
+            placeholder="Filter repositories by name or language..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              paddingLeft: 34,
+              fontSize: 13,
+              borderRadius: 'var(--radius-md)',
+              width: '100%',
+            }}
           />
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={addLoading || !newUrl.trim()}
-            style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            {addLoading ? (
-              <>
-                <span className="spinner" style={{ width: 14, height: 14 }}></span>
-                <span>Adding...</span>
-              </>
-            ) : (
-              <span>+ Add Repo</span>
-            )}
-          </button>
-        </form>
-
-        {/* Quick Sample Suggestions */}
-        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Quick Suggestions:</span>
-          {[
-            'https://github.com/Rupesh5988/DevRisk-AI',
-            'https://github.com/expressjs/express',
-            'https://github.com/public-apis/public-apis',
-            'https://github.com/facebook/react',
-          ].map((sample) => (
+          {searchQuery && (
             <button
-              key={sample}
-              type="button"
-              onClick={() => setNewUrl(sample)}
+              onClick={() => setSearchQuery('')}
               style={{
-                background: 'var(--bg-glass)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '3px 8px',
-                fontSize: 11,
-                color: 'var(--text-secondary)',
+                position: 'absolute',
+                right: 10,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
                 cursor: 'pointer',
-                fontFamily: 'monospace',
               }}
             >
-              {sample.replace('https://github.com/', '')}
+              ✕
             </button>
-          ))}
+          )}
         </div>
 
-        {addMessage && (
-          <div
-            style={{
-              marginTop: 14,
-              padding: '10px 14px',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 13,
-              background: addMessage.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-              border: `1px solid ${addMessage.type === 'success' ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-              color: addMessage.type === 'success' ? 'var(--risk-low)' : 'var(--risk-high)',
-            }}
-          >
-            {addMessage.text}
-          </div>
-        )}
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => setLocalModalOpen(true)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '11px 22px',
+            fontSize: 14.5,
+            fontWeight: 700,
+            borderRadius: 'var(--radius-md)',
+            boxShadow: '0 2px 10px rgba(79, 70, 229, 0.35)',
+            transition: 'all 150ms ease',
+            letterSpacing: '-0.01em',
+          }}
+        >
+          <span>+</span>
+          <span>Connect Repository</span>
+        </button>
       </div>
 
-      {/* Repository Cards */}
-      {repos.length === 0 ? (
-        <div className="empty-state">
+      {/* Spacious 3-Column Repository Grid */}
+      {filteredRepos.length === 0 ? (
+        <div className="empty-state" style={{ padding: '40px 20px' }}>
           <div className="empty-state-icon">📁</div>
-          <div className="empty-state-title">No Repositories</div>
-          <div className="empty-state-text">
-            Add a GitHub repository URL above to start tracking PR risk scores.
+          <div className="empty-state-title">
+            {repos.length === 0 ? 'No Repositories Connected' : 'No Matching Repositories'}
           </div>
+          <div className="empty-state-text">
+            {repos.length === 0
+              ? 'Connect a GitHub repository to begin continuous pull request defect risk scoring.'
+              : `No repositories match "${searchQuery}".`}
+          </div>
+          {repos.length === 0 && (
+            <button
+              className="btn btn-primary"
+              onClick={() => setLocalModalOpen(true)}
+              style={{ marginTop: 16 }}
+            >
+              + Connect Your First Repository
+            </button>
+          )}
         </div>
       ) : (
-        <div className="stats-grid">
-          {repos.map((repo, idx) => (
-            <div
-              key={repo.id}
-              className="stat-card animate-in"
-              style={{ cursor: 'pointer', position: 'relative' }}
-              onClick={() => navigate(`/repos/${repo.id}`)}
-              draggable
-              onDragStart={(e) => handleDragStart(e, idx)}
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, idx)}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 12 }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {repo.name}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {repo.owner}/{repo.name}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  {repo.language && (
-                    <span style={{
-                      fontSize: 11, padding: '3px 10px', borderRadius: 12,
-                      background: 'rgba(99,102,241,0.1)', color: 'var(--accent-primary)',
-                      fontWeight: 600,
-                    }}>
-                      {repo.language}
-                    </span>
-                  )}
-                  <button 
-                    onClick={(e) => handleDelete(e, repo.id)}
+        <div className="repo-grid-3">
+          {filteredRepos.map((repo) => {
+            const hasHighRisk = (repo.high_risk_count || 0) > 0;
+            return (
+              <div
+                key={repo.id}
+                className="repo-card-modern animate-in"
+                onClick={() => navigate(`/repos/${repo.id}`)}
+              >
+                <div>
+                  {/* Top Bar: Name, Language & Delete */}
+                  <div
                     style={{
-                      background: 'transparent', border: 'none', color: 'var(--text-muted)', 
-                      cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', transition: 'color 0.2s'
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      marginBottom: 10,
+                      gap: 8,
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.color = 'var(--risk-high)'}
-                    onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                    title="Delete Repository"
                   >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <h4
+                        style={{
+                          margin: 0,
+                          fontSize: 16,
+                          fontWeight: 700,
+                          color: 'var(--text-primary)',
+                          wordBreak: 'break-word',
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {repo.name}
+                      </h4>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--text-muted)',
+                          marginTop: 3,
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        {repo.owner}/{repo.name}
+                      </div>
+                    </div>
 
-              <div style={{ display: 'flex', gap: 20, fontSize: 13 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 20, color: 'var(--text-primary)' }}>
-                    {repo.total_prs || 0}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      {repo.is_private && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            padding: '2px 7px',
+                            borderRadius: 6,
+                            background: 'rgba(234, 179, 8, 0.15)',
+                            color: '#eab308',
+                            fontWeight: 600,
+                          }}
+                        >
+                          🔒 Private
+                        </span>
+                      )}
+                      {repo.language && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            background: 'rgba(99, 102, 241, 0.1)',
+                            color: 'var(--accent-primary)',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {repo.language}
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => handleDelete(e, repo.id, repo.name)}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          padding: 4,
+                          display: 'flex',
+                          alignItems: 'center',
+                          borderRadius: 4,
+                          transition: 'color 0.2s',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--risk-high)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+                        title="Disconnect Repository"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>PRs</div>
+
+                  {/* Operational Health Badge */}
+                  <div style={{ marginBottom: 16 }}>
+                    {hasHighRisk ? (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          color: 'var(--risk-high)',
+                          background: 'var(--risk-high-bg)',
+                          padding: '3px 8px',
+                          borderRadius: 6,
+                          border: '1px solid rgba(220, 38, 38, 0.25)',
+                        }}
+                      >
+                        <span>🔴</span>
+                        <span>{repo.high_risk_count} High Risk PRs (Attention Needed)</span>
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          color: 'var(--risk-low)',
+                          background: 'var(--risk-low-bg)',
+                          padding: '3px 8px',
+                          borderRadius: 6,
+                          border: '1px solid rgba(22, 163, 74, 0.25)',
+                        }}
+                      >
+                        <span>🟢</span>
+                        <span>Quality Gate Healthy (0 High Risk)</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 20, color: 'var(--text-primary)' }}>
-                    {repo.avg_risk_score || 0}%
+
+                {/* Metrics Footer */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    paddingTop: 14,
+                    borderTop: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: 20 }}>
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 700,
+                          color: 'var(--text-primary)',
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        {repo.total_prs || 0}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Evaluated PRs</div>
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 700,
+                          color: hasHighRisk ? 'var(--risk-high)' : 'var(--text-primary)',
+                          fontFamily: 'monospace',
+                        }}
+                      >
+                        {repo.avg_risk_score || 0}%
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Avg Risk Score</div>
+                    </div>
                   </div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>Avg Risk</div>
-                </div>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 20, color: 'var(--risk-high)' }}>
-                    {repo.high_risk_count || 0}
-                  </div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>High Risk</div>
+
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--accent-primary)',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    View PRs ↗
+                  </span>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-    </>
+
+      {/* Connect Repository Modal (Progressive Disclosure) */}
+      {isModalOpen && (
+        <div className="modal-backdrop" onClick={handleCloseModal}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Connect Repository</h3>
+                <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                  Continuous pull request risk scoring and CI/CD quality gate enforcement.
+                </p>
+              </div>
+              <button className="modal-close-btn" onClick={handleCloseModal} title="Close">
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <form onSubmit={handleAddRepo}>
+                <div style={{ marginBottom: 14 }}>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      marginBottom: 6,
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    GitHub Repository URL or Shorthand
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="e.g. Rupesh5988/COMPLETE-PROJECT-AGRIASSIST or full URL"
+                    value={newUrl}
+                    onChange={(e) => setNewUrl(e.target.value)}
+                    disabled={addLoading}
+                    style={{ fontSize: 13, width: '100%' }}
+                    autoFocus
+                  />
+                </div>
+
+                {/* Real-time Visibility Feedback */}
+                {visibilityStatus && (
+                  <div style={{ marginBottom: 14, fontSize: 12 }}>
+                    {visibilityStatus.checking ? (
+                      <span style={{ color: 'var(--text-muted)' }}>🔍 Probing repository type...</span>
+                    ) : visibilityStatus.is_private ? (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          color: '#eab308',
+                          background: 'rgba(234, 179, 8, 0.12)',
+                          padding: '4px 10px',
+                          borderRadius: 8,
+                          fontWeight: 600,
+                        }}
+                      >
+                        🔒 Private Repository Detected — Personal Access Token (PAT) Required
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          color: '#22c55e',
+                          background: 'rgba(34, 197, 94, 0.12)',
+                          padding: '4px 10px',
+                          borderRadius: 8,
+                          fontWeight: 600,
+                        }}
+                      >
+                        🌐 Public Repository — Ready to Connect (No Token Needed)
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* PAT Input Section */}
+                <div style={{ marginBottom: 14 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowTokenInput(!showTokenInput)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: showTokenInput ? 'var(--accent-primary)' : 'var(--text-muted)',
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      padding: 0,
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <span>{showTokenInput ? '▼' : '▶'}</span>
+                    <span>Private Repository? Enter Personal Access Token (PAT)</span>
+                  </button>
+
+                  {showTokenInput && (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        background: 'var(--bg-input)',
+                        padding: 12,
+                        borderRadius: 8,
+                        border: '1px solid var(--border-subtle)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          marginBottom: 6,
+                          fontSize: 11.5,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+                          GitHub PAT (with repo scope)
+                        </span>
+                        <a
+                          href="https://github.com/settings/tokens"
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: 'var(--accent-primary)', textDecoration: 'none' }}
+                        >
+                          Generate on GitHub ↗
+                        </a>
+                      </div>
+                      <input
+                        ref={tokenInputRef}
+                        type="password"
+                        className="input-field"
+                        placeholder="ghp_xxxxxxxxxxxx"
+                        value={accessToken}
+                        onChange={(e) => setAccessToken(e.target.value)}
+                        disabled={addLoading}
+                        style={{ fontSize: 13, width: '100%' }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {addMessage && (
+                  <div
+                    style={{
+                      marginBottom: 14,
+                      padding: '8px 12px',
+                      borderRadius: 6,
+                      fontSize: 12.5,
+                      fontWeight: 500,
+                      color: addMessage.type === 'success' ? 'var(--risk-low)' : 'var(--risk-high)',
+                      background:
+                        addMessage.type === 'success' ? 'var(--risk-low-bg)' : 'var(--risk-high-bg)',
+                    }}
+                  >
+                    {addMessage.text}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleCloseModal}
+                    disabled={addLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={addLoading || !newUrl.trim()}
+                  >
+                    {addLoading ? 'Connecting...' : 'Connect Repository'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

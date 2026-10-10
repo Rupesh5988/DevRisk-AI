@@ -106,9 +106,9 @@ export default function Info() {
                 <li style={{ marginBottom: 8 }}><strong>Robustness:</strong> This scale provides immense statistical significance, allowing the system to use 80% of the data (~85,000 PRs) purely for training and 20% (~21,000 PRs) as unseen testing data to prove accuracy without overfitting.</li>
               </ul>
 
-              <h3 style={{ marginBottom: 12 }}>2. Live System SZZ Validation Process</h3>
+              <h3 style={{ marginBottom: 12 }}>2. Post-Merge SZZ Specification & Demonstration Harness</h3>
               <p style={{ color: 'var(--text-secondary)', marginBottom: 12 }}>
-                While the AI was <em>trained</em> on public Apache projects, the live dashboard evaluates predictions by running the <strong>SZZ Algorithm</strong> directly on your connected GitHub/GitLab repositories. The algorithm uses the following mathematical background process to find bugs in your own code:
+                In production architectures with longitudinal history, the system evaluates predictions by running the <strong>SZZ Algorithm</strong> directly on connected repositories as subsequent bug-fix PRs emerge. In the prototype dashboard, the evaluation harness demonstrates this workflow:
               </p>
               <div style={{ padding: 16, background: 'var(--bg-glass)', border: '1px solid var(--border-subtle)', borderRadius: 6, marginBottom: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>

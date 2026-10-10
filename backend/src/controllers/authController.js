@@ -152,4 +152,88 @@ async function getMe(req, res) {
   }
 }
 
-module.exports = { register, login, getMe };
+/**
+ * PUT /api/auth/profile
+ * Update user full_name, email, or github_token.
+ */
+async function updateProfile(req, res) {
+  try {
+    const { full_name, email, github_token } = req.body;
+
+    // Check if email is already in use by another account
+    if (email) {
+      const emailCheck = await pool.query(
+        'SELECT id FROM users WHERE email = $1 AND id != $2',
+        [email, req.user.id]
+      );
+      if (emailCheck.rows.length > 0) {
+        return res.status(409).json({ error: 'Email is already in use by another account.' });
+      }
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET full_name = COALESCE($1, full_name),
+           email = COALESCE($2, email),
+           github_token = COALESCE($3, github_token)
+       WHERE id = $4
+       RETURNING id, username, email, full_name, github_token, created_at`,
+      [full_name, email, github_token, req.user.id]
+    );
+
+    res.json({
+      message: 'Profile updated successfully.',
+      user: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[Auth] updateProfile error:', err.message);
+    res.status(500).json({ error: 'Failed to update profile.' });
+  }
+}
+
+/**
+ * PUT /api/auth/password
+ * Change current user password.
+ */
+async function changePassword(req, res) {
+  try {
+    const { current_password, new_password } = req.body;
+
+    if (!current_password || !new_password) {
+      return res.status(400).json({ error: 'Current password and new password are required.' });
+    }
+
+    if (new_password.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+    }
+
+    const userResult = await pool.query(
+      'SELECT password_hash FROM users WHERE id = $1',
+      [req.user.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const isMatch = await bcrypt.compare(current_password, userResult.rows[0].password_hash);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'Current password is incorrect.' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const newHash = await bcrypt.hash(new_password, salt);
+
+    await pool.query(
+      'UPDATE users SET password_hash = $1 WHERE id = $2',
+      [newHash, req.user.id]
+    );
+
+    res.json({ message: 'Password updated successfully.' });
+  } catch (err) {
+    console.error('[Auth] changePassword error:', err.message);
+    res.status(500).json({ error: 'Failed to update password.' });
+  }
+}
+
+module.exports = { register, login, getMe, updateProfile, changePassword };

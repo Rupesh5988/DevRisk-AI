@@ -84,10 +84,10 @@ function isBugFix(title, body) {
  * @param {Array}  prFiles     - Array of file objects from GitHub API
  * @returns {Object} Feature object with all 14 values + metadata
  */
-async function extractFeatures(owner, repo, prNumber, prDetails, prFiles) {
-  const authorLogin = prDetails.user.login;
-  const prTitle = prDetails.title || '';
-  const prBody = prDetails.body || '';
+async function extractFeatures(owner, repo, prNumber, prDetails, prFiles, repoToken = null) {
+  const authorLogin = prDetails?.user?.login || 'developer';
+  const prTitle = prDetails?.title || '';
+  const prBody = prDetails?.body || '';
 
   // -------------------------------------------------------
   // DIRECT FEATURES (computed from prFiles array directly)
@@ -120,9 +120,6 @@ async function extractFeatures(owner, repo, prNumber, prDetails, prFiles) {
   // -------------------------------------------------------
   // GIT-HISTORY FEATURES (require GitHub API calls)
   // -------------------------------------------------------
-  // These are more expensive — we fetch commit history for each file
-  // and for the author. We limit API calls to keep within rate limits.
-
   let lt = 0;        // Total lines in modified files (before change)
   let totalAge = 0;  // Sum of file ages (days since last commit)
   let totalNuc = 0;  // Sum of unique changes per file
@@ -132,8 +129,8 @@ async function extractFeatures(owner, repo, prNumber, prDetails, prFiles) {
   const filesToProcess = prFiles.slice(0, 20);
 
   for (const file of filesToProcess) {
-    // Fetch commit history for this file
-    const fileCommits = await githubService.getFileCommitHistory(owner, repo, file.filename, 50);
+    // Fetch commit history for this file using the repoToken for private repo access
+    const fileCommits = await githubService.getFileCommitHistory(owner, repo, file.filename, 50, repoToken);
 
     // ndev: Collect unique authors across all modified files
     for (const commit of fileCommits) {
@@ -153,11 +150,6 @@ async function extractFeatures(owner, repo, prNumber, prDetails, prFiles) {
       totalAge += ageDays;
     }
 
-    // lt: Approximate total lines of modified files
-    // (GitHub doesn't give us this directly — we estimate from file changes)
-    // For a more accurate value, you'd fetch each file's content, but that's
-    // too many API calls. We use: additions + deletions + (changes - additions)
-    // as a rough proxy, or just use the patch size.
     lt += (file.changes || 0);
   }
 
@@ -178,8 +170,8 @@ async function extractFeatures(owner, repo, prNumber, prDetails, prFiles) {
   // DEVELOPER EXPERIENCE FEATURES
   // -------------------------------------------------------
 
-  // Fetch author's commit history in this repo
-  const authorCommits = await githubService.getAuthorCommitHistory(owner, repo, authorLogin);
+  // Fetch author's commit history in this repo (authenticated with repoToken)
+  const authorCommits = await githubService.getAuthorCommitHistory(owner, repo, authorLogin, repoToken);
 
   // exp: Total prior commits by this author in the repo
   const exp = authorCommits.length;

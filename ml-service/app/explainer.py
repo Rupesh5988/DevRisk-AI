@@ -26,116 +26,116 @@ except (ImportError, OSError):
 # Plain-English templates for all 28 features (both raw & engineered domain metrics)
 SHAP_TEMPLATES = {
     "ns": {
-        "positive": "Changes span {value} subsystems — wide architectural spread increases defect probability",
-        "negative": "Changes are contained within {value} subsystem(s) — focused, localized scope",
+        "positive": "Spans {value} subsystems — wide architectural spread increases defect risk",
+        "negative": "Confined to {value} subsystem(s) — isolated domain scope",
     },
     "nd": {
         "positive": "Modifications touch {value} distinct directories — scattered directory footprint",
-        "negative": "Modifications are restricted to {value} directory(ies) — well-contained footprint",
+        "negative": "Restricted to {value} directory(ies) — well-contained directory scope",
     },
     "nf": {
-        "positive": "{value} files modified — broad attack surface and higher regression likelihood",
-        "negative": "Only {value} file(s) changed — minimal file surface area",
+        "positive": "{value} files modified — wide review surface and higher regression risk",
+        "negative": "Only {value} file(s) modified — compact change surface",
     },
     "entropy": {
-        "positive": "Unevenly distributed changes (entropy: {value:.2f}) — concentrated code modifications",
-        "negative": "Evenly distributed changes (entropy: {value:.2f}) — balanced, orderly modifications",
+        "positive": "Scattered modifications (entropy: {value:.2f}) — edits dispersed across files",
+        "negative": "Concentrated modifications (entropy: {value:.2f}) — orderly, localized edits",
     },
     "la": {
-        "positive": "{value} lines added — substantial new logic introduced",
-        "negative": "Only {value} lines added — lightweight addition",
+        "positive": "{value} lines added — large influx of new code",
+        "negative": "Only {value} lines added — lightweight, low-risk addition",
     },
     "ld": {
-        "positive": "{value} lines deleted — large removals may break implicit dependencies",
-        "negative": "Only {value} lines deleted — minimal disruption to existing codebase",
+        "positive": "{value} lines deleted — substantial code removal may break callers",
+        "negative": "Only {value} lines deleted — routine cleanup with minimal disruption",
     },
     "lt": {
-        "positive": "Modified files encompass {value} total lines — altering large files has wider blast radius",
-        "negative": "Modified files are relatively compact ({value} total lines) — lower blast radius",
+        "positive": "Modified files contain {value} total lines — large files have higher blast radius",
+        "negative": "Modified files are compact ({value} total lines) — localized blast radius",
     },
     "fix": {
-        "positive": "This commit addresses an existing defect — historical data shows bug fixes have higher recurrence risk",
-        "negative": "Standard feature / non-fix commit — typical baseline defect incidence",
+        "positive": "Bug fix commit — bug fixes carry 2x higher defect recurrence risk",
+        "negative": "Routine task/feature commit — baseline defect probability",
     },
     "ndev": {
-        "positive": "{value} distinct past contributors on these files — fragmented code ownership",
-        "negative": "Only {value} past contributor(s) — consistent code conventions and ownership",
+        "positive": "{value} prior authors on files — high contributor turnover and mixed styles",
+        "negative": "Only {value} prior author(s) — clear ownership and consistent conventions",
     },
     "age": {
-        "positive": "Files were last modified ~{value:.0f} days ago — dormant/stale files carry hidden coupling",
-        "negative": "Files were actively maintained (~{value:.0f} days ago) — fresh in team memory",
+        "positive": "Files dormant for ~{value:.0f} days — stale code carries obsolete assumptions",
+        "negative": "Files actively maintained (~{value:.0f} days ago) — current test context",
     },
     "nuc": {
-        "positive": "Files have undergone {value} prior revisions — defect-prone hotspot files",
-        "negative": "Files have only {value} prior revision(s) — historically stable code",
+        "positive": "Files revised {value} times historically — defect-prone hotspot code",
+        "negative": "Only {value} historical revision(s) — historically stable code",
     },
     "exp": {
-        "positive": "Contributor has only {value} lifetime commits in this repo — unfamiliar with overall patterns",
-        "negative": "Contributor has {value} prior commits — highly experienced repository contributor",
+        "positive": "Author has {value} lifetime commits — new contributor to this repository",
+        "negative": "Author has {value} prior commits — experienced repository contributor",
     },
     "rexp": {
-        "positive": "Contributor has only {value} recent commits in last 90 days — may be out of sync with current practices",
-        "negative": "Contributor has {value} recent commits — actively immersed in the codebase",
+        "positive": "Author has {value} recent commits in last 90 days — low recent commit velocity",
+        "negative": "Author has {value} recent commits in last 90 days — active and current context",
     },
     "sexp": {
-        "positive": "Contributor has only {value} prior commits in these specific subsystems — unfamiliar domain",
-        "negative": "Contributor has {value} commits in these subsystems — recognized domain specialist",
+        "positive": "Author has only {value} previous commits in these subsystems — first-time domain edits",
+        "negative": "Author has {value} commits in these subsystems — recognized domain specialist",
     },
     "churn_density": {
-        "positive": "High churn density ({value:.2f}) — a large fraction of the file's contents was rewritten",
+        "positive": "High churn density ({value:.2f}) — large fraction of target files rewritten",
         "negative": "Low churn density ({value:.2f}) — surgical modification without rewriting file structure",
     },
     "la_ratio": {
-        "positive": "Heavily skewed towards addition ({value:.2f}) — significant influx of unverified code",
-        "negative": "Balanced addition/deletion ratio ({value:.2f}) — standard refactoring pattern",
+        "positive": "Heavily skewed towards additions ({value:.2f}) — large volume of new code paths",
+        "negative": "Balanced additions and deletions ({value:.2f}) — routine refactoring pattern",
     },
     "exp_per_file": {
-        "positive": "Low author experience per touched file ({value:.2f}) — contributor is spread thin across files",
-        "negative": "High author experience per touched file ({value:.2f}) — thoroughly familiar with each file",
+        "positive": "Low author experience per touched file ({value:.2f}) — author scope is spread thin",
+        "negative": "High author experience per touched file ({value:.2f}) — author knows each modified file well",
     },
     "recent_exp_ratio": {
-        "positive": "Low recent activity ratio ({value:.2f}) — contributor history is predominantly distant",
-        "negative": "High recent activity ratio ({value:.2f}) — contributor's recent track record is strong",
+        "positive": "Low recent activity ratio ({value:.2f}) — author history is predominantly older commits",
+        "negative": "High recent activity ratio ({value:.2f}) — author is actively shipping code in recent sprints",
     },
     "exp_vs_complexity": {
-        "positive": "Change complexity exceeds contributor's experience factor ({value:.2f})",
-        "negative": "Contributor's experience comfortably handles the change complexity ({value:.2f})",
+        "positive": "Change complexity exceeds author experience factor ({value:.2f}) — recommend senior pair review",
+        "negative": "Author experience comfortably matches change complexity ({value:.2f})",
     },
     "subsystem_familiarity": {
-        "positive": "Low subsystem specialization ({value:.2f}) — author rarely touches these components",
-        "negative": "High subsystem specialization ({value:.2f}) — author knows these components deeply",
+        "positive": "Low subsystem specialization ({value:.2f}) — author editing outside core domain",
+        "negative": "High subsystem specialization ({value:.2f}) — author editing within core domain",
     },
     "churn_intensity": {
-        "positive": "High churn intensity ({value:.2f}) — large volume of changes concentrated in high-entropy zones",
-        "negative": "Low churn intensity ({value:.2f}) — modest changes in simple, low-entropy zones",
+        "positive": "High review strain index ({value:.2f}) — heavy volume concentrated in scattered files",
+        "negative": "Low review strain index ({value:.2f}) — modest, straightforward review burden",
     },
     "dev_density_risk": {
-        "positive": "High author turnover rate relative to file age ({value:.2f}) — multiple authors without single owner",
-        "negative": "Stable ownership density ({value:.2f}) — low author churn over file lifetime",
+        "positive": "High author turnover relative to file age ({value:.2f}) — lack of single code ownership",
+        "negative": "Stable ownership density ({value:.2f}) — clear, consistent code stewardship",
     },
     "diffusion_factor": {
-        "positive": "High architectural diffusion ({value:.2f}) — changes span multiple subsystems across few files",
-        "negative": "Low architectural diffusion ({value:.2f}) — changes remain tightly bounded within directory structure",
+        "positive": "High architectural diffusion ({value:.2f}) — changes touch opposing ends of the architecture",
+        "negative": "Low architectural diffusion ({value:.2f}) — changes stay tightly bounded within package",
     },
     "churn_asymmetry": {
-        "positive": "High churn asymmetry ({value:.2f}) — massive one-sided edit indicates rewrite volatility",
-        "negative": "Balanced churn symmetry ({value:.2f}) — symmetric additions and removals suggest routine refactor",
+        "positive": "High churn asymmetry ({value:.2f}) — one-sided rewrite indicates high volatility",
+        "negative": "Balanced churn symmetry ({value:.2f}) — symmetric changes indicate routine refactoring",
     },
     "churn_per_file": {
         "positive": "High churn per file ({value:.2f}) — dense modifications concentrated per file",
         "negative": "Low churn per file ({value:.2f}) — lightweight edits per file",
     },
     "fragility_index": {
-        "positive": "Elevated codebase fragility ({value:.2f}) — frequent historical revisions touched by newer author",
-        "negative": "Low fragility ({value:.2f}) — stable codebase touched by experienced developer",
+        "positive": "High code fragility ({value:.2f}) — volatile legacy code touched by newer author",
+        "negative": "Low fragility ({value:.2f}) — resilient codebase touched by experienced author",
     },
     "subsystem_entropy": {
         "positive": "Subsystem modification is unevenly concentrated ({value:.2f})",
-        "negative": "Subsystem modification is evenly distributed ({value:.2f})",
+        "negative": "Subsystem modification is cleanly distributed ({value:.2f})",
     },
     "rexp_vs_sexp": {
-        "positive": "Contributor is active in other repo areas but has little experience in these specific subsystems ({value:.2f})",
-        "negative": "Contributor's recent activity aligns closely with their subsystem experience ({value:.2f})",
+        "positive": "Active in other repository areas but has limited history in these subsystems ({value:.2f})",
+        "negative": "Recent activity aligns with domain history in these subsystems ({value:.2f})",
     },
 }
 
