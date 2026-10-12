@@ -614,5 +614,68 @@ async function listAllPRs(req, res) {
   }
 }
 
-module.exports = { getPRById, getPRsByRepo, simulatePRAnalysis, listAllPRs };
+/**
+ * POST /api/prs/:id/refresh
+ *
+ * Re-fetches the latest code/diff from GitHub (or stored commit),
+ * re-extracts the 14 change metrics, re-runs the Calibrated ML model
+ * and AST security scanner, and returns consistent, true risk scores.
+ */
+async function reanalyzePR(req, res) {
+  const { id } = req.params;
+  const { processPullRequest } = require('./webhookController');
+  const githubService = require('../services/githubService');
+
+  try {
+    const prResult = await pool.query(
+      `SELECT pr.*, r.name AS repo_name, r.owner AS repo_owner, r.github_url AS repo_url, r.access_token
+       FROM pull_requests pr
+       JOIN repositories r ON pr.repo_id = r.id
+       WHERE pr.id = $1`,
+      [id]
+    );
+
+    if (prResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Pull request not found' });
+    }
+
+    const prRow = prResult.rows[0];
+    const token = prRow.access_token || process.env.GITHUB_TOKEN || null;
+
+    // Fetch fresh PR details
+    let prData = await githubService.getPRDetails(prRow.repo_owner, prRow.repo_name, prRow.pr_number, token);
+    if (!prData || !prData.number) {
+      prData = {
+        number: prRow.pr_number,
+        title: prRow.title,
+        user: { login: prRow.author },
+        state: prRow.status,
+        html_url: prRow.github_url,
+      };
+    }
+
+    const repoInfo = {
+      name: prRow.repo_name,
+      owner: { login: prRow.repo_owner },
+      html_url: prRow.repo_url,
+    };
+
+    const mockPayload = {
+      action: 'synchronize',
+      pull_request: prData,
+      repository: repoInfo,
+    };
+
+    // Re-execute full deterministic pipeline
+    await processPullRequest(mockPayload, prRow.repo_id);
+
+    // Call getPRById to return the updated full payload
+    return getPRById(req, res);
+  } catch (err) {
+    console.error('[PRController] Error refreshing PR analysis:', err.message);
+    res.status(500).json({ error: 'Failed to refresh PR analysis', details: err.message });
+  }
+}
+
+module.exports = { getPRById, getPRsByRepo, simulatePRAnalysis, listAllPRs, reanalyzePR };
 

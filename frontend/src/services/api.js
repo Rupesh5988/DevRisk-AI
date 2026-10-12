@@ -75,6 +75,7 @@ export const listAllPRs = (page = 1, limit = 1000, riskLabel = null, search = nu
 };
 
 export const getPRDetail = (id) => api.get(`/prs/${id}`);
+export const refreshPRAnalysis = (id) => api.post(`/prs/${id}/refresh`);
 export const simulatePR = (data) => api.post('/prs/simulate', data);
 
 // ---- Analytics ----

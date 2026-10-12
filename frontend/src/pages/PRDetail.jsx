@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getPRDetail, getGroundTruthByPR, analyzeGroundTruth } from '../services/api';
+import { getPRDetail, refreshPRAnalysis, getGroundTruthByPR, analyzeGroundTruth } from '../services/api';
 import RiskGauge from '../components/RiskGauge';
 import ShapCard from '../components/ShapCard';
 import GraphView from '../components/GraphView';
@@ -19,6 +19,8 @@ export default function PRDetail() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
   const [gtData, setGtData] = useState(null);
@@ -160,6 +162,22 @@ export default function PRDetail() {
     }
   };
 
+  const handleRefreshRisk = async () => {
+    try {
+      setRefreshing(true);
+      setRefreshSuccess(false);
+      const res = await refreshPRAnalysis(id);
+      setData(res.data);
+      setRefreshSuccess(true);
+      setTimeout(() => setRefreshSuccess(false), 3000);
+    } catch (err) {
+      console.error('Failed to refresh PR analysis:', err);
+      alert('Failed to refresh risk prediction. Please ensure backend and ML service are running.');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleSimulateInPlayground = () => {
     navigate('/simulator', {
       state: {
@@ -194,6 +212,27 @@ export default function PRDetail() {
           </div>
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-secondary"
+              onClick={handleRefreshRisk}
+              disabled={refreshing}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 13,
+                padding: '7px 14px',
+                borderColor: refreshSuccess ? 'var(--risk-low)' : undefined,
+                color: refreshSuccess ? 'var(--risk-low)' : undefined,
+              }}
+              title="Re-fetch code, re-compute features, re-run calibrated ML & AST security scanner"
+            >
+              <span style={{ display: 'inline-block', transform: refreshing ? 'rotate(360deg)' : 'none', transition: 'transform 0.8s ease' }}>
+                {refreshing ? '⏳' : refreshSuccess ? '✅' : '🔄'}
+              </span>
+              <span>{refreshing ? 'Recalculating...' : refreshSuccess ? 'Risk Synchronized!' : 'Refresh Risk'}</span>
+            </button>
+
             <button
               className="btn btn-primary"
               onClick={handleSimulateInPlayground}
