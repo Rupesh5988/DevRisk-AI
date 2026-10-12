@@ -690,6 +690,7 @@ async function getGroundTruthByRepo(req, res) {
     console.error('[GroundTruth] getGroundTruthByRepo error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
   }
+}
 // ─────────────────────────────────────────────────────────────
 // GET /api/model-validation/benchmark-metrics
 // Returns authoritative offline training & evaluation metrics
