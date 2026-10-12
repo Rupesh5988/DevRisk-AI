@@ -50,6 +50,15 @@ async function getPRById(req, res) {
       [id]
     );
 
+    // Fetch security vulnerabilities
+    const vulnResult = await pool.query(
+      `SELECT id, vulnerability_type, severity, cvss_score, file_path, line_number, snippet, description, remediation, impact_score
+       FROM pr_security_vulnerabilities
+       WHERE pr_id = $1
+       ORDER BY cvss_score DESC, id ASC`,
+      [id]
+    );
+
     // Fetch dependency graph
     const graphResult = await pool.query(
       `SELECT source_file, target_file
@@ -74,6 +83,8 @@ async function getPRById(req, res) {
         author: pr.author,
         risk_score: pr.risk_score,
         risk_label: pr.risk_label,
+        security_score: pr.security_score || 0,
+        vulnerability_count: pr.vulnerability_count || vulnResult.rows.length,
         additions: pr.additions,
         deletions: pr.deletions,
         files_changed: pr.files_changed,
@@ -102,6 +113,7 @@ async function getPRById(req, res) {
           }
         : null,
       shap_explanations: shapResult.rows,
+      security_vulnerabilities: vulnResult.rows,
       dependency_graph: {
         nodes: Array.from(nodeSet),
         edges,
@@ -141,7 +153,8 @@ async function getPRsByRepo(req, res) {
     // Build query with optional risk_label filter
     let query = `
       SELECT id, pr_number, title, author, risk_score, risk_label,
-             additions, deletions, files_changed, status, github_url, created_at
+             additions, deletions, files_changed, status, github_url, created_at,
+             security_score, vulnerability_count
       FROM pull_requests
       WHERE repo_id = $1
     `;
@@ -191,6 +204,7 @@ async function getPRsByRepo(req, res) {
  */
 async function simulatePRAnalysis(req, res) {
   const mlService = require('../services/mlService');
+  const securityScanner = require('../services/securityScanner');
   const { FEATURE_ORDER } = require('../utils/featureNames');
 
   try {
@@ -199,6 +213,7 @@ async function simulatePRAnalysis(req, res) {
       author = 'developer_sandbox',
       features: rawFeatures = {},
       files = [],
+      code_snippet = '',
       save_to_db = false,
       repo_id = null,
     } = req.body;
@@ -231,11 +246,40 @@ async function simulatePRAnalysis(req, res) {
       riskLabel = riskScore >= 70 ? 'HIGH' : riskScore >= 40 ? 'MEDIUM' : 'LOW';
     }
 
+    // Security scanning for code_snippet or file patches
+    let securityScan = { vulnerabilities: [], security_risk_score: 0, has_critical: false };
+    if (code_snippet && code_snippet.trim()) {
+      const vulns = securityScanner.scanContent(code_snippet, 'simulated_change.js');
+      securityScan = securityScanner.scanPRFiles([{ filename: 'simulated_change.js', patch: code_snippet }]);
+    } else if (Array.isArray(files) && files.some(f => typeof f === 'object' && (f.patch || f.content))) {
+      securityScan = securityScanner.scanPRFiles(files);
+    }
+
+    // Escalate risk score if security vulnerabilities found
+    if (securityScan.vulnerabilities.length > 0) {
+      riskScore = Math.min(98, Math.max(riskScore, securityScan.security_risk_score));
+      if (riskScore >= 70 || securityScan.has_critical) {
+        riskLabel = 'HIGH';
+      } else if (riskScore >= 40) {
+        riskLabel = 'MEDIUM';
+      }
+    }
+
     // Get SHAP explanations
     const shapExplanations = await mlService.getExplanation(features);
 
+    // Prepend top security findings to explanations
+    for (const vuln of securityScan.vulnerabilities.slice(0, 3)) {
+      shapExplanations.unshift({
+        feature_name: `[SECURITY] ${vuln.vulnerability_type}`,
+        shap_value: (vuln.impact_score || 25) / 100,
+        feature_value: vuln.cvss_score || 9.0,
+        explanation: `[${vuln.severity}] ${vuln.description} (${vuln.file_path}:${vuln.line_number})`,
+      });
+    }
+
     // Build realistic dependency graph & blast radius
-    let graphFiles = files.length > 0 ? files : [
+    let graphFiles = files.length > 0 ? (typeof files[0] === 'string' ? files : files.map(f => f.filename || 'file.js')) : [
       'src/controllers/authController.js',
       'src/services/authService.js',
       'src/models/userModel.js',
@@ -275,7 +319,15 @@ async function simulatePRAnalysis(req, res) {
       reason: 'Low defect risk (<40%). Code changes meet repository stability and test coverage standards.',
     };
 
-    if (riskScore >= 70) {
+    if (securityScan.has_critical) {
+      const maxCvss = Math.max(...securityScan.vulnerabilities.map((v) => v.cvss_score || 9.0));
+      cicdGate = {
+        status: 'MERGE_BLOCKED',
+        badge_color: 'red',
+        headline: `Merge Blocked — Critical Security Vulnerability Detected (CVSS ${maxCvss})`,
+        reason: `Detected ${securityScan.vulnerabilities.length} severe security vulnerability(ies). Host execution, database exposure, or credential leakage risk identified. Quality Gate strictly blocked.`,
+      };
+    } else if (riskScore >= 70) {
       cicdGate = {
         status: 'MERGE_BLOCKED',
         badge_color: 'red',
@@ -293,6 +345,11 @@ async function simulatePRAnalysis(req, res) {
 
     // Generate actionable developer recommendations
     const recommendations = [];
+    if (securityScan.vulnerabilities.length > 0) {
+      securityScan.vulnerabilities.forEach((v) => {
+        recommendations.push(`[SECURITY] ${v.vulnerability_type}: ${v.remediation}`);
+      });
+    }
     if (features.la > 300) {
       recommendations.push('Split Pull Request: Over 300 lines added. Break into smaller, atomic PRs to simplify review and lower regression risk.');
     }
@@ -316,6 +373,7 @@ async function simulatePRAnalysis(req, res) {
 | :--- | :--- | :--- |
 | **Defect Probability** | \`${riskScore}%\` | ${riskLabel} |
 | **CI/CD Quality Gate** | \`${cicdGate.status}\` | ${cicdGate.headline} |
+| **Security Issues** | \`${securityScan.vulnerabilities.length} vulnerabilities\` | Score: ${securityScan.security_risk_score}% |
 | **Files Impacted** | \`${blastRadius.total_affected_modules} modules\` | Blast radius reach |
 
 #### 🔍 Top Contributing Factors:
@@ -346,8 +404,8 @@ ${recommendations.map((r) => `- ${r}`).join('\n')}
 
         const prInsert = await pool.query(
           `INSERT INTO pull_requests
-           (repo_id, pr_number, title, author, risk_score, risk_label, additions, deletions, files_changed, status, github_url)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           (repo_id, pr_number, title, author, risk_score, risk_label, additions, deletions, files_changed, status, github_url, security_score, vulnerability_count)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id`,
           [
             targetRepoId,
@@ -361,6 +419,8 @@ ${recommendations.map((r) => `- ${r}`).join('\n')}
             features.nf || graphFiles.length,
             'open',
             `https://github.com/simulated/pull/${nextPrNumber}`,
+            securityScan.security_risk_score,
+            securityScan.vulnerability_count,
           ]
         );
         savedPrId = prInsert.rows[0].id;
@@ -390,6 +450,27 @@ ${recommendations.map((r) => `- ${r}`).join('\n')}
           }
         }
 
+        // Insert security vulnerabilities
+        for (const vuln of securityScan.vulnerabilities) {
+          await pool.query(
+            `INSERT INTO pr_security_vulnerabilities
+             (pr_id, vulnerability_type, severity, cvss_score, file_path, line_number, snippet, description, remediation, impact_score)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [
+              savedPrId,
+              vuln.vulnerability_type,
+              vuln.severity,
+              vuln.cvss_score,
+              vuln.file_path,
+              vuln.line_number,
+              vuln.snippet,
+              vuln.description,
+              vuln.remediation,
+              vuln.impact_score,
+            ]
+          );
+        }
+
         // Insert dependency edges
         for (const edge of edges) {
           await pool.query(
@@ -409,6 +490,8 @@ ${recommendations.map((r) => `- ${r}`).join('\n')}
         author,
         risk_score: riskScore,
         risk_label: riskLabel,
+        security_score: securityScan.security_risk_score,
+        vulnerability_count: securityScan.vulnerability_count,
         ci_cd_gate: cicdGate,
         features,
         blast_radius: blastRadius,
@@ -416,6 +499,7 @@ ${recommendations.map((r) => `- ${r}`).join('\n')}
         github_markdown_comment: markdownComment,
       },
       shap_explanations: shapExplanations,
+      security_vulnerabilities: securityScan.vulnerabilities,
       dependency_graph: {
         nodes: Array.from(nodeSet),
         edges,
@@ -447,6 +531,7 @@ async function listAllPRs(req, res) {
     let query = `
       SELECT pr.id, pr.pr_number, pr.title, pr.author, pr.risk_score, pr.risk_label,
              pr.additions, pr.deletions, pr.files_changed, pr.status, pr.github_url, pr.created_at,
+             pr.security_score, pr.vulnerability_count,
              r.name AS repo_name, r.owner AS repo_owner, r.id AS repo_id,
              gtr.ground_truth_status, pe.evaluation_result
       FROM pull_requests pr

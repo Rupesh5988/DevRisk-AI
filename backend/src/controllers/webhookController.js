@@ -11,6 +11,7 @@ const githubService = require('../services/githubService');
 const { extractFeatures } = require('../services/featureExtractor');
 const { buildDependencyGraph, isJSFile } = require('../services/dependencyParser');
 const mlService = require('../services/mlService');
+const securityScanner = require('../services/securityScanner');
 const { FEATURE_ORDER, getRiskLabel } = require('../utils/featureNames');
 
 /**
@@ -133,21 +134,52 @@ async function processPullRequest(payload, targetRepoId = null) {
   // Step 2e: Call the Python ML service for prediction
   // -------------------------------------------------------
   const prediction = await mlService.predictRisk(features);
-  const riskScore = prediction.risk_score;
-  const riskLabel = prediction.risk_label;
+  const baseMlRiskScore = prediction.risk_score;
+  const baseMlRiskLabel = prediction.risk_label;
 
-  console.log(`[Webhook] PR #${prNumber} → Risk: ${riskScore}% (${riskLabel})`);
+  // -------------------------------------------------------
+  // Step 2e.2: Semantic AST & Security Vulnerability Scanning
+  // -------------------------------------------------------
+  const securityScan = securityScanner.scanPRFiles(prFiles);
+  console.log(`[Webhook] PR #${prNumber} Security Scan: ${securityScan.vulnerabilities.length} issues found, Security Score: ${securityScan.security_risk_score}%`);
+
+  // Calculate composite risk score:
+  // If critical security vulnerabilities are found, escalate risk score and quality gate
+  let riskScore = baseMlRiskScore;
+  let riskLabel = baseMlRiskLabel;
+
+  if (securityScan.vulnerabilities.length > 0) {
+    riskScore = Math.min(98, Math.max(baseMlRiskScore, securityScan.security_risk_score));
+    if (riskScore >= 70 || securityScan.has_critical) {
+      riskLabel = 'HIGH';
+    } else if (riskScore >= 40) {
+      riskLabel = 'MEDIUM';
+    } else {
+      riskLabel = 'LOW';
+    }
+  }
+
+  console.log(`[Webhook] PR #${prNumber} → Final Composite Risk: ${riskScore}% (${riskLabel}) [ML: ${baseMlRiskScore}%, Sec: ${securityScan.security_risk_score}%]`);
 
   // -------------------------------------------------------
   // Step 2f: Get SHAP explanations
   // -------------------------------------------------------
   let explanations = [];
-  if (riskScore >= 0) {
+  if (baseMlRiskScore >= 0) {
     // Only request explanations if ML service was available
     explanations = await mlService.getExplanation(features);
   }
 
-  // -------------------------------------------------------
+  // Prepend top security findings to explanations for immediate visibility
+  for (const vuln of securityScan.vulnerabilities.slice(0, 3)) {
+    explanations.unshift({
+      feature_name: `[SECURITY] ${vuln.vulnerability_type}`,
+      shap_value: (vuln.impact_score || 25) / 100,
+      feature_value: vuln.cvss_score || 9.0,
+      explanation: `[${vuln.severity}] ${vuln.description} (${vuln.file_path}:${vuln.line_number})`,
+    });
+  }
+
   // -------------------------------------------------------
   // Step 2g: Store everything in PostgreSQL
   // -------------------------------------------------------
@@ -159,11 +191,13 @@ async function processPullRequest(payload, targetRepoId = null) {
       // Upsert the Pull Request record for this specific repo_id
       const prResult = await client.query(
         `INSERT INTO pull_requests (repo_id, pr_number, title, author, risk_score, risk_label,
-                                     additions, deletions, files_changed, status, github_url)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                                     additions, deletions, files_changed, status, github_url,
+                                     security_score, vulnerability_count)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (repo_id, pr_number)
          DO UPDATE SET risk_score = $5, risk_label = $6, additions = $7, deletions = $8,
-                       files_changed = $9, title = $3, status = $10
+                       files_changed = $9, title = $3, status = $10,
+                       security_score = $12, vulnerability_count = $13
          RETURNING id`,
         [
           repoRow.id,
@@ -177,6 +211,8 @@ async function processPullRequest(payload, targetRepoId = null) {
           prFiles.length,
           pr.state || 'open',
           pr.html_url,
+          securityScan.security_risk_score,
+          securityScan.vulnerability_count,
         ]
       );
       const prId = prResult.rows[0].id;
@@ -200,6 +236,28 @@ async function processPullRequest(payload, targetRepoId = null) {
           `INSERT INTO shap_explanations (pr_id, feature_name, shap_value, feature_value, explanation)
            VALUES ($1, $2, $3, $4, $5)`,
           [prId, expl.feature_name, expl.shap_value, expl.feature_value, expl.explanation]
+        );
+      }
+
+      // Delete old security vulnerabilities and insert new ones
+      await client.query('DELETE FROM pr_security_vulnerabilities WHERE pr_id = $1', [prId]);
+      for (const vuln of securityScan.vulnerabilities) {
+        await client.query(
+          `INSERT INTO pr_security_vulnerabilities
+           (pr_id, vulnerability_type, severity, cvss_score, file_path, line_number, snippet, description, remediation, impact_score)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            prId,
+            vuln.vulnerability_type,
+            vuln.severity,
+            vuln.cvss_score,
+            vuln.file_path,
+            vuln.line_number,
+            vuln.snippet,
+            vuln.description,
+            vuln.remediation,
+            vuln.impact_score,
+          ]
         );
       }
 

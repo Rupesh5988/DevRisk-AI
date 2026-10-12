@@ -296,8 +296,13 @@ a:hover {
 .main-content {
   margin-left: var(--sidebar-width);
   flex: 1;
-  padding: 32px 40px;
+  padding: 32px 36px;
   min-height: 100vh;
+  width: calc(100% - var(--sidebar-width));
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  transition: margin-left var(--transition-base), width var(--transition-base);
 }
 
 .full-page-content {
@@ -333,6 +338,8 @@ a:hover {
   padding: 24px;
   transition: all var(--transition-base);
   box-shadow: var(--shadow-sm);
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .card:hover {
@@ -346,6 +353,8 @@ a:hover {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .card-title {
@@ -2018,6 +2027,14 @@ select.input-field option {
   user-select: none;
 }
 
+.top-user-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
 .top-user-status-dot {
   position: absolute;
   bottom: 1px;
@@ -2257,6 +2274,8 @@ select.input-field option {
    ============================================================ */
 .settings-container {
   max-width: 1100px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .settings-subnav-bar {
@@ -2542,6 +2561,16 @@ select.input-field option {
 
 .app-layout.sidebar-collapsed .main-content {
   margin-left: 80px;
+  width: calc(100% - 80px);
+}
+
+/* 4 boxes in a single row when sidebar is closed */
+.app-layout.sidebar-collapsed .repo-grid-3 {
+  grid-template-columns: repeat(4, 1fr) !important;
+}
+
+.app-layout.sidebar-collapsed .kpi-grid-3 {
+  grid-template-columns: repeat(4, 1fr) !important;
 }
 
 .spin {
@@ -2656,11 +2685,32 @@ select.input-field option {
   box-shadow: 0 2px 8px var(--accent-primary-glow);
 }
 
-/* Spacious 3-Column Repositories Grid */
+/* Spacious 3-Column Repositories Grid (3 in open sidebar, 4 in closed sidebar) */
 .repo-grid-3 {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 20px;
+}
+
+.repo-card-modern.draggable-card {
+  cursor: grab;
+  user-select: none;
+}
+
+.repo-card-modern.draggable-card:active {
+  cursor: grabbing;
+}
+
+.repo-card-modern.is-dragging {
+  opacity: 0.45;
+  transform: scale(0.98);
+  border: 2px dashed var(--accent-primary) !important;
+}
+
+.repo-card-modern.drag-over {
+  border: 2px solid var(--accent-primary) !important;
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.45);
+  transform: translateY(-4px);
 }
 
 .repo-card-modern {
@@ -2691,9 +2741,263 @@ select.input-field option {
   margin-bottom: 28px;
 }
 
-@media (max-width: 992px) {
+/* ============================================================
+   RESPONSIVE DESIGN SYSTEM (Desktop, Tablet, Mobile)
+   ============================================================ */
+
+/* Large Tablets & Small Laptops (<= 1024px) */
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-width: 220px;
+  }
+
+  .main-content {
+    margin-left: var(--sidebar-width);
+    width: calc(100% - var(--sidebar-width));
+    padding: 24px 28px;
+  }
+
+  .page-header {
+    padding-right: 72px;
+  }
+
   .kpi-grid-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .grid-2 {
     grid-template-columns: 1fr;
   }
+
+  .grid-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
+
+/* Tablets (<= 860px) */
+@media (max-width: 860px) {
+  :root {
+    --sidebar-width: 72px;
+  }
+
+  /* Automatically compact sidebar on tablet */
+  .sidebar {
+    width: 72px;
+    align-items: center;
+  }
+
+  .sidebar .sidebar-logo {
+    padding: 20px 0;
+    justify-content: center;
+  }
+
+  .sidebar .logo-info {
+    display: none !important;
+  }
+
+  .sidebar .sidebar-label {
+    display: none !important;
+  }
+
+  .sidebar .sidebar-link {
+    justify-content: center;
+    padding: 12px 0;
+  }
+
+  .sidebar .sidebar-icon {
+    margin-right: 0 !important;
+  }
+
+  .sidebar .sidebar-nav-utilities li {
+    display: flex;
+    justify-content: center;
+  }
+
+  .main-content {
+    margin-left: 72px !important;
+    width: calc(100% - 72px) !important;
+    padding: 20px 20px;
+  }
+
+  .app-layout.sidebar-collapsed .main-content {
+    margin-left: 72px !important;
+    width: calc(100% - 72px) !important;
+  }
+
+  .top-user-menu {
+    top: 14px;
+    right: 16px;
+  }
+
+  .top-user-avatar-btn {
+    width: 42px;
+    height: 42px;
+  }
+
+  .top-user-avatar-initial {
+    font-size: 16px;
+  }
+
+  .page-header {
+    padding-right: 60px;
+    margin-bottom: 20px;
+  }
+
+  .page-title {
+    font-size: 22px;
+  }
+
+  .kpi-grid-3 {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+  }
+
+  .settings-subnav-bar {
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .settings-subnav-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+}
+
+/* Mobile Devices (<= 640px) */
+@media (max-width: 640px) {
+  :root {
+    --sidebar-width: 0px;
+  }
+
+  /* Compact navigation for mobile screens */
+  .sidebar {
+    transform: translateX(-100%);
+    box-shadow: 2px 0 16px rgba(0, 0, 0, 0.6);
+  }
+
+  /* Show toggle when hovering/active, or standard compact bottom/top bar */
+  .sidebar.mobile-open {
+    transform: translateX(0);
+    width: 240px;
+    align-items: flex-start;
+  }
+
+  .main-content {
+    margin-left: 0 !important;
+    padding: 16px 14px;
+  }
+
+  .app-layout.sidebar-collapsed .main-content {
+    margin-left: 0 !important;
+  }
+
+  .page-header {
+    padding-right: 52px;
+    margin-bottom: 16px;
+  }
+
+  .page-title {
+    font-size: 20px;
+    line-height: 1.25;
+  }
+
+  .page-subtitle {
+    font-size: 12.5px;
+  }
+
+  .card {
+    padding: 16px;
+    border-radius: var(--radius-md);
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .grid-2,
+  .grid-3 {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .repo-grid-3 {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .top-user-menu {
+    top: 10px;
+    right: 12px;
+  }
+
+  .top-user-avatar-btn {
+    width: 38px;
+    height: 38px;
+  }
+
+  .user-dropdown-panel {
+    width: calc(100vw - 24px);
+    right: -6px;
+    max-width: 320px;
+  }
+
+  /* Ensure horizontal scroll on table wrapper */
+  .table-container,
+  .pr-table-container,
+  .table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Simulator Sliders & Controls */
+  .slider-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* Buttons & Flex Rows */
+  .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .card-header .btn,
+  .view-tab-btn {
+    width: auto;
+  }
+
+  /* Settings Navigation Bar Horizontal Scroll */
+  .settings-subnav-bar {
+    display: flex;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+    padding: 6px;
+  }
+
+  .settings-subnav-btn {
+    flex-shrink: 0;
+    padding: 7px 12px;
+    font-size: 11.5px;
+  }
+
+  /* Form Grids full width */
+  form div[style*="gridTemplateColumns"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
 

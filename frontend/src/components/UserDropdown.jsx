@@ -64,6 +64,8 @@ export default function UserDropdown() {
     navigate('/login');
   }
 
+  const avatarUrl = user.avatar_url || localStorage.getItem('devrisk_avatar_url');
+
   return (
     <div className="top-user-menu" ref={dropdownRef}>
       {/* Single rounded icon button visible in top right corner */}
@@ -78,7 +80,15 @@ export default function UserDropdown() {
         aria-label="User profile, settings and theme menu"
         aria-expanded={isOpen}
       >
-        <span className="top-user-avatar-initial">{initial}</span>
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt="Profile Avatar"
+            className="top-user-avatar-img"
+          />
+        ) : (
+          <span className="top-user-avatar-initial">{initial}</span>
+        )}
         <span className="top-user-status-dot" />
       </button>
 
@@ -91,7 +101,17 @@ export default function UserDropdown() {
             onClick={() => handleNavigateSubSetting('profile')}
             style={{ cursor: 'pointer' }}
           >
-            <div className="user-dropdown-avatar">{initial}</div>
+            <div className="user-dropdown-avatar">
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt="Avatar"
+                  style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                />
+              ) : (
+                initial
+              )}
+            </div>
             <div className="user-dropdown-profile-info">
               <div className="user-dropdown-name">{user.full_name || user.username}</div>
               <div className="user-dropdown-email">{user.email || 'developer@devrisk.ai'}</div>

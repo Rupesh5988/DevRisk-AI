@@ -58,6 +58,39 @@ export default function Settings() {
   const [githubToken, setGithubToken] = useState(user?.github_token || '');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileMessage, setProfileMessage] = useState(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('devrisk_avatar_url') || '');
+
+  const handleAvatarUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setProfileMessage({ type: 'error', text: 'Image file size must be under 2MB.' });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result;
+      setAvatarUrl(base64);
+      localStorage.setItem('devrisk_avatar_url', base64);
+      if (updateUser) {
+        updateUser({ avatar_url: base64 });
+      }
+      setProfileMessage({ type: 'success', text: 'Profile photo updated successfully!' });
+      setTimeout(() => setProfileMessage(null), 3500);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveAvatar = () => {
+    setAvatarUrl('');
+    localStorage.removeItem('devrisk_avatar_url');
+    if (updateUser) {
+      updateUser({ avatar_url: '' });
+    }
+    setProfileMessage({ type: 'success', text: 'Profile photo reset to default initial avatar.' });
+    setTimeout(() => setProfileMessage(null), 3500);
+  };
 
   // Password Form State
   const [currentPassword, setCurrentPassword] = useState('');
@@ -100,6 +133,7 @@ export default function Settings() {
       if (updateUser && res.data?.user) {
         updateUser(res.data.user);
       }
+      setIsEditingProfile(false);
       setProfileMessage({ type: 'success', text: 'Profile changes saved successfully!' });
       setTimeout(() => setProfileMessage(null), 4000);
     } catch (err) {
@@ -543,18 +577,40 @@ jobs:
       {/* SUB-SETTING 5: USER PROFILE & ACCOUNT */}
       {activeTab === 'profile' && (
         <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* 1. Developer Identity Header Card */}
+          {/* 1. Developer Identity Header & Profile View / Edit Card */}
           <div className="card">
             <div className="card-header" style={{ marginBottom: 16 }}>
               <div>
                 <h3 className="card-title">Developer Identity & Account Profile</h3>
                 <span className="card-subtitle">
-                  Configure your engineering credentials, public profile, and repository author identity
+                  {isEditingProfile 
+                    ? 'Edit your engineering credentials, public profile, and repository author identity' 
+                    : 'Your verified engineering credentials, public profile, and repository author identity'}
                 </span>
               </div>
-              <span className="badge badge-primary" style={{ padding: '6px 14px', fontSize: 12 }}>
-                {user?.role || 'Active Developer'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="badge badge-primary" style={{ padding: '6px 14px', fontSize: 12 }}>
+                  {user?.role || 'Active Developer'}
+                </span>
+                {!isEditingProfile && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => setIsEditingProfile(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '7px 16px',
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>✏️</span>
+                    <span>Edit Profile</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {profileMessage && (
@@ -590,129 +646,310 @@ jobs:
               </div>
             )}
 
-            <form onSubmit={handleSaveProfile}>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                  gap: 16,
-                  marginBottom: 16,
-                }}
-              >
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                    Full Name
-                  </label>
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="e.g. Alex Morgan"
-                    style={{
-                      width: '100%',
-                      padding: '9px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--bg-input)',
-                      border: '1px solid var(--border-medium)',
-                      color: 'var(--text-primary)',
-                      fontSize: 13,
-                      outline: 'none',
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="developer@company.com"
-                    style={{
-                      width: '100%',
-                      padding: '9px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--bg-input)',
-                      border: '1px solid var(--border-medium)',
-                      color: 'var(--text-primary)',
-                      fontSize: 13,
-                      outline: 'none',
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                    Engineering Role / Specialization
-                  </label>
-                  <select
-                    value={engineeringRole}
-                    onChange={(e) => setEngineeringRole(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '9px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--bg-input)',
-                      border: '1px solid var(--border-medium)',
-                      color: 'var(--text-primary)',
-                      fontSize: 13,
-                      outline: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <option value="Senior Tech Lead & Code Reviewer">Senior Tech Lead & Code Reviewer</option>
-                    <option value="Staff Software Engineer">Staff Software Engineer</option>
-                    <option value="Full-Stack Developer">Full-Stack Developer</option>
-                    <option value="DevOps & Release Engineer">DevOps & Release Engineer</option>
-                    <option value="Machine Learning Specialist">Machine Learning Specialist</option>
-                    <option value="QA & Defect Prevention Lead">QA & Defect Prevention Lead</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                    GitHub Handle / Username
-                  </label>
-                  <input
-                    type="text"
-                    value={githubHandle}
-                    onChange={(e) => setGithubHandle(e.target.value)}
-                    placeholder="e.g. octocat"
-                    style={{
-                      width: '100%',
-                      padding: '9px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--bg-input)',
-                      border: '1px solid var(--border-medium)',
-                      color: 'var(--text-primary)',
-                      fontSize: 13,
-                      outline: 'none',
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={isSavingProfile}
+            {/* Profile Avatar Card Hero */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 20,
+                padding: '20px',
+                background: 'var(--bg-glass)',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px solid var(--border-subtle)',
+                marginBottom: 24,
+                flexWrap: 'wrap',
+              }}
+            >
+              {/* Avatar circle */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                <div
                   style={{
-                    display: 'inline-flex',
+                    width: 76,
+                    height: 76,
+                    borderRadius: '50%',
+                    background: avatarUrl ? 'transparent' : 'var(--accent-primary)',
+                    border: '3px solid var(--border-medium)',
+                    display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
-                    padding: '9px 20px',
-                    fontSize: 13,
-                    fontWeight: 600,
+                    justifyContent: 'center',
+                    color: '#fff',
+                    fontSize: 28,
+                    fontWeight: 800,
+                    overflow: 'hidden',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                    flexShrink: 0,
                   }}
                 >
-                  <Save size={15} />
-                  <span>{isSavingProfile ? 'Saving Changes...' : 'Save Profile Changes'}</span>
-                </button>
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={fullName || user?.username || 'Avatar'}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <span>{(fullName || user?.username || 'U')[0].toUpperCase()}</span>
+                  )}
+                </div>
+
+                {/* Change photo button below profile photo */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <label
+                    htmlFor="avatar-upload-input"
+                    className="btn btn-secondary"
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      borderRadius: 'var(--radius-sm)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      margin: 0,
+                    }}
+                  >
+                    <span>📷</span>
+                    <span>Change Photo</span>
+                  </label>
+                  <input
+                    id="avatar-upload-input"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarUpload}
+                    style={{ display: 'none' }}
+                  />
+                  {avatarUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveAvatar}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--risk-high)',
+                        fontSize: 10.5,
+                        cursor: 'pointer',
+                        padding: 0,
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
               </div>
-            </form>
+
+              {/* Bio summary */}
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {fullName || user?.username || 'Developer'}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {email || user?.email || 'developer@devrisk.ai'}
+                </div>
+                <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+                  <span className="chip" style={{ fontSize: 11, background: 'var(--bg-card)' }}>
+                    💼 {engineeringRole}
+                  </span>
+                  {githubHandle && (
+                    <span className="chip" style={{ fontSize: 11, background: 'var(--bg-card)' }}>
+                      🐙 @{githubHandle}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Read-Only View vs Edit Form */}
+            {!isEditingProfile ? (
+              <div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                    gap: 16,
+                    marginBottom: 20,
+                  }}
+                >
+                  <div style={{ padding: '14px 16px', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Full Name</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginTop: 4 }}>
+                      {fullName || 'Not specified'}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '14px 16px', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Email Address</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginTop: 4 }}>
+                      {email || 'Not specified'}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '14px 16px', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Engineering Role</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginTop: 4 }}>
+                      {engineeringRole}
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '14px 16px', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>GitHub Username</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginTop: 4 }}>
+                      {githubHandle ? `@${githubHandle}` : 'Not connected'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => setIsEditingProfile(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '9px 20px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>✏️</span>
+                    <span>Edit Profile Details</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleSaveProfile}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                    gap: 16,
+                    marginBottom: 20,
+                  }}
+                >
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                      Full Name
+                    </label>
+                    <input
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="e.g. Alex Morgan"
+                      style={{
+                        width: '100%',
+                        padding: '9px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        background: 'var(--bg-input)',
+                        border: '1px solid var(--border-medium)',
+                        color: 'var(--text-primary)',
+                        fontSize: 13,
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="developer@company.com"
+                      style={{
+                        width: '100%',
+                        padding: '9px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        background: 'var(--bg-input)',
+                        border: '1px solid var(--border-medium)',
+                        color: 'var(--text-primary)',
+                        fontSize: 13,
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                      Engineering Role / Specialization
+                    </label>
+                    <select
+                      value={engineeringRole}
+                      onChange={(e) => setEngineeringRole(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '9px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        background: 'var(--bg-input)',
+                        border: '1px solid var(--border-medium)',
+                        color: 'var(--text-primary)',
+                        fontSize: 13,
+                        outline: 'none',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <option value="Senior Tech Lead & Code Reviewer">Senior Tech Lead & Code Reviewer</option>
+                      <option value="Staff Software Engineer">Staff Software Engineer</option>
+                      <option value="Full-Stack Developer">Full-Stack Developer</option>
+                      <option value="DevOps & Release Engineer">DevOps & Release Engineer</option>
+                      <option value="Machine Learning Specialist">Machine Learning Specialist</option>
+                      <option value="QA & Defect Prevention Lead">QA & Defect Prevention Lead</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                      GitHub Handle / Username
+                    </label>
+                    <input
+                      type="text"
+                      value={githubHandle}
+                      onChange={(e) => setGithubHandle(e.target.value)}
+                      placeholder="e.g. octocat"
+                      style={{
+                        width: '100%',
+                        padding: '9px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        background: 'var(--bg-input)',
+                        border: '1px solid var(--border-medium)',
+                        color: 'var(--text-primary)',
+                        fontSize: 13,
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setIsEditingProfile(false)}
+                    style={{ padding: '9px 18px', fontSize: 13 }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={isSavingProfile}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '9px 20px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <Save size={15} />
+                    <span>{isSavingProfile ? 'Saving Changes...' : 'Save Profile Changes'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
 
           {/* 2. Developer Quality Gate & Review Preferences */}

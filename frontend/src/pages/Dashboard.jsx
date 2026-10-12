@@ -27,8 +27,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Active view tab: 'prs' (default actionable feed) or 'repos' (codebase management)
-  const [activeTab, setActiveTab] = useState('prs');
+  // Active view tab: 'repos' (monitored repositories first) or 'prs' (actionable feed)
+  const [activeTab, setActiveTab] = useState('repos');
 
   // PR Triage filters
   const [riskFilter, setRiskFilter] = useState('ALL');
@@ -295,19 +295,19 @@ export default function Dashboard() {
         <div className="view-tabs">
           <button
             type="button"
-            className={`view-tab-btn ${activeTab === 'prs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('prs')}
-          >
-            <ListTodo size={15} />
-            <span>Active Pull Requests ({totalPRs})</span>
-          </button>
-          <button
-            type="button"
             className={`view-tab-btn ${activeTab === 'repos' ? 'active' : ''}`}
             onClick={() => setActiveTab('repos')}
           >
             <FolderGit2 size={15} />
             <span>Monitored Repositories ({totalRepos})</span>
+          </button>
+          <button
+            type="button"
+            className={`view-tab-btn ${activeTab === 'prs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('prs')}
+          >
+            <ListTodo size={15} />
+            <span>Active Pull Requests ({totalPRs})</span>
           </button>
         </div>
       </div>

@@ -77,6 +77,7 @@ function parseDiffToFiles(diffText) {
       additions: adds,
       deletions: dels,
       changes: adds + dels,
+      patch: chunk,
     });
   }
   return files;

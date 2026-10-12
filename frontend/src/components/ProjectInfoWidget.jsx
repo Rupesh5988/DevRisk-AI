@@ -3,7 +3,10 @@ import Info from '../pages/Info'; // The existing Info page component
 
 export default function ProjectInfoWidget() {
   const [isOpen, setIsOpen] = useState(false);
-  const [position, setPosition] = useState({ x: window.innerWidth - 80, y: window.innerHeight - 80 });
+  const [position, setPosition] = useState(() => ({
+    x: typeof window !== 'undefined' ? Math.max(20, window.innerWidth - 64) : 1000,
+    y: typeof window !== 'undefined' ? Math.max(20, window.innerHeight - 64) : 800,
+  }));
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
 
@@ -11,8 +14,8 @@ export default function ProjectInfoWidget() {
   useEffect(() => {
     const handleResize = () => {
       setPosition(prev => ({
-        x: Math.min(prev.x, window.innerWidth - 60),
-        y: Math.min(prev.y, window.innerHeight - 60)
+        x: Math.max(16, Math.min(prev.x, window.innerWidth - 56)),
+        y: Math.max(16, Math.min(prev.y, window.innerHeight - 56))
       }));
     };
     window.addEventListener('resize', handleResize);

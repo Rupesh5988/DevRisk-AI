@@ -113,7 +113,7 @@ async function initializeTables() {
       CREATE TABLE IF NOT EXISTS shap_explanations (
         id              SERIAL PRIMARY KEY,
         pr_id           INTEGER REFERENCES pull_requests(id) ON DELETE CASCADE,
-        feature_name    VARCHAR(50) NOT NULL,
+        feature_name    VARCHAR(200) NOT NULL,
         shap_value      FLOAT NOT NULL,
         feature_value   FLOAT,
         explanation     TEXT
@@ -197,6 +197,30 @@ async function initializeTables() {
         created_at         TIMESTAMP DEFAULT NOW(),
         UNIQUE(pr_id)
       );
+    `);
+
+    // 10. Security Vulnerabilities table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS pr_security_vulnerabilities (
+        id                  SERIAL PRIMARY KEY,
+        pr_id               INTEGER REFERENCES pull_requests(id) ON DELETE CASCADE,
+        vulnerability_type  VARCHAR(100) NOT NULL,
+        severity            VARCHAR(20) NOT NULL,
+        cvss_score          FLOAT,
+        file_path           VARCHAR(500),
+        line_number         INTEGER,
+        snippet             TEXT,
+        description         TEXT,
+        remediation         TEXT,
+        impact_score        FLOAT,
+        created_at          TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    // Ensure security columns exist on pull_requests table
+    await client.query(`
+      ALTER TABLE pull_requests ADD COLUMN IF NOT EXISTS security_score FLOAT DEFAULT 0;
+      ALTER TABLE pull_requests ADD COLUMN IF NOT EXISTS vulnerability_count INTEGER DEFAULT 0;
     `);
 
     await client.query('COMMIT');

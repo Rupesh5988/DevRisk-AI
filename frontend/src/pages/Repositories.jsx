@@ -109,17 +109,82 @@ export default function Repositories({
     };
   }, [newUrl, accessToken]);
 
+  const [draggedId, setDraggedId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+
   async function fetchRepos() {
     try {
       setLoading(true);
       const res = await listRepos();
-      setRepos(res.data.repositories || []);
+      const rawRepos = res.data.repositories || [];
+      
+      // Load saved order from localStorage if available
+      const savedOrder = JSON.parse(localStorage.getItem('devrisk_repos_order') || '[]');
+      if (Array.isArray(savedOrder) && savedOrder.length > 0) {
+        const orderMap = new Map();
+        savedOrder.forEach((id, idx) => orderMap.set(id, idx));
+        rawRepos.sort((a, b) => {
+          const posA = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
+          const posB = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
+          return posA - posB;
+        });
+      }
+      setRepos(rawRepos);
     } catch (err) {
       setError('Failed to load repositories');
     } finally {
       setLoading(false);
     }
   }
+
+  const handleDragStart = (e, id) => {
+    setDraggedId(id);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(id));
+  };
+
+  const handleDragOver = (e, id) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverId !== id) {
+      setDragOverId(id);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverId(null);
+  };
+
+  const handleDrop = (e, targetId) => {
+    e.preventDefault();
+    setDragOverId(null);
+    if (!draggedId || draggedId === targetId) {
+      setDraggedId(null);
+      return;
+    }
+
+    setRepos((prev) => {
+      const fromIndex = prev.findIndex((r) => r.id === draggedId);
+      const toIndex = prev.findIndex((r) => r.id === targetId);
+      if (fromIndex === -1 || toIndex === -1) return prev;
+
+      const newRepos = [...prev];
+      const [movedItem] = newRepos.splice(fromIndex, 1);
+      newRepos.splice(toIndex, 0, movedItem);
+
+      // Save order to localStorage
+      const idOrder = newRepos.map((r) => r.id);
+      localStorage.setItem('devrisk_repos_order', JSON.stringify(idOrder));
+      return newRepos;
+    });
+
+    setDraggedId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setDragOverId(null);
+  };
 
   const handleAddRepo = async (e) => {
     e.preventDefault();
@@ -300,11 +365,21 @@ export default function Repositories({
         <div className="repo-grid-3">
           {filteredRepos.map((repo) => {
             const hasHighRisk = (repo.high_risk_count || 0) > 0;
+            const isDragging = draggedId === repo.id;
+            const isOver = dragOverId === repo.id;
+
             return (
               <div
                 key={repo.id}
-                className="repo-card-modern animate-in"
+                draggable
+                onDragStart={(e) => handleDragStart(e, repo.id)}
+                onDragOver={(e) => handleDragOver(e, repo.id)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, repo.id)}
+                onDragEnd={handleDragEnd}
+                className={`repo-card-modern animate-in draggable-card ${isDragging ? 'is-dragging' : ''} ${isOver ? 'drag-over' : ''}`}
                 onClick={() => navigate(`/repos/${repo.id}`)}
+                title="Drag to rearrange position • Click to inspect PR details"
               >
                 <div>
                   {/* Top Bar: Name, Language & Delete */}
