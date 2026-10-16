@@ -67,9 +67,11 @@ async function addRepo(req, res) {
   }
 
   const owner = match[1];
-  const repo = match[2].replace('.git', '');
+  const repo = match[2].replace(/\.git$/, '');
 
   const cleanToken = access_token && access_token.trim() ? access_token.trim() : null;
+  const userProfileToken = req.user?.github_token && req.user.github_token.trim() ? req.user.github_token.trim() : null;
+  const effectiveToken = cleanToken || userProfileToken || null;
 
   try {
     // Check if already tracked by THIS user
@@ -84,50 +86,70 @@ async function addRepo(req, res) {
       });
     }
 
-    // Verify the repository exists on GitHub with smart public/private detection
+    // Verify repository with smart public vs. private detection
     let repoInfo;
-    if (cleanToken) {
-      try {
-        repoInfo = await githubService.getRepoInfo(owner, repo, cleanToken);
-      } catch (ghErr) {
-        return res.status(400).json({
-          error: `Could not access private repository with provided token: ${ghErr.message}`,
-          token_invalid: true,
-          is_private: true,
-        });
-      }
-    } else {
+    let isPrivate = false;
+    let tokenToStore = cleanToken; // Stored at repository level
+
+    // 1. Try public access first if no cleanToken provided
+    if (!cleanToken) {
       try {
         repoInfo = await githubService.getRepoInfo(owner, repo, null);
-      } catch (ghErr) {
+        if (repoInfo.private) {
+          isPrivate = true;
+        }
+      } catch (pubErr) {
+        // Unauthenticated access failed — likely private or requires auth
+        isPrivate = true;
+      }
+    }
+
+    // 2. If private or explicit token provided, authenticate with effectiveToken
+    if (isPrivate || cleanToken) {
+      if (!effectiveToken) {
         return res.status(400).json({
-          error: 'This repository appears to be private or requires authentication.',
+          error: 'This repository is private or requires authentication.',
           requires_token: true,
           is_private: true,
+          has_saved_pat: !!userProfileToken,
           message: 'Private repository detected. Please enter a Personal Access Token (PAT) with repo scope.',
+        });
+      }
+
+      try {
+        repoInfo = await githubService.getRepoInfo(owner, repo, effectiveToken);
+        tokenToStore = cleanToken || userProfileToken;
+      } catch (ghErr) {
+        return res.status(400).json({
+          error: `Could not access repository with token: ${ghErr.message}`,
+          token_invalid: true,
+          is_private: true,
+          has_saved_pat: !!userProfileToken,
+          message: 'GitHub authentication failed. Please check your Personal Access Token.',
         });
       }
     }
 
-    // Insert into database with access_token
+    // Insert into database with access_token (or null for public repos)
     const result = await pool.query(
       `INSERT INTO repositories (user_id, github_url, name, owner, language, access_token)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [req.user.id, repoInfo.html_url, repo, owner, repoInfo.language || null, cleanToken]
+      [req.user.id, repoInfo.html_url || `https://github.com/${owner}/${repo}`, repo, owner, repoInfo.language || null, tokenToStore]
     );
 
     const newRepo = result.rows[0];
-    console.log(`[RepoController] Repository added: ${owner}/${repo} (Private: ${cleanToken ? 'YES' : 'NO'})`);
+    console.log(`[RepoController] Repository added: ${owner}/${repo} (Private: ${isPrivate ? 'YES' : 'NO'}, Token: ${tokenToStore ? 'YES' : 'NO'})`);
 
     // --- BACKGROUND SYNC ---
+    const syncToken = tokenToStore || userProfileToken || null;
     setTimeout(async () => {
       try {
         console.log(`[RepoController] Starting background sync for ${owner}/${repo}...`);
         const { processPullRequest } = require('./webhookController');
-        let recentPRs = await githubService.getRecentPRs(owner, repo, 100, cleanToken).catch(() => []);
+        let recentPRs = await githubService.getRecentPRs(owner, repo, 100, syncToken).catch(() => []);
         if (!recentPRs || recentPRs.length === 0) {
-          recentPRs = await githubService.getRecentCommitsAsPRs(owner, repo, 100, cleanToken).catch(() => []);
+          recentPRs = await githubService.getRecentCommitsAsPRs(owner, repo, 100, syncToken).catch(() => []);
         }
         
         for (const pr of recentPRs) {
@@ -219,7 +241,7 @@ async function syncRepo(req, res) {
     }
 
     const { owner, name: repo } = result.rows[0];
-    let repoToken = result.rows[0].access_token;
+    let repoToken = result.rows[0].access_token || req.user?.github_token || null;
 
     // If an updated token was provided in the sync request, save it
     if (access_token && access_token.trim()) {
@@ -354,54 +376,69 @@ async function checkRepoVisibility(req, res) {
   }
 
   const cleanToken = access_token && access_token.trim() ? access_token.trim() : null;
+  const userProfileToken = req.user?.github_token && req.user.github_token.trim() ? req.user.github_token.trim() : null;
+  const effectiveToken = cleanToken || userProfileToken || null;
 
-  // 1. Check anonymously first
+  // 1. Check anonymously first for public repository
   try {
     const pubInfo = await githubService.getRepoInfo(owner, repo, null);
-    return res.json({
-      is_private: false,
-      requires_token: false,
-      owner,
-      repo,
-      name: pubInfo.name || repo,
-      language: pubInfo.language,
-      stars: pubInfo.stargazers_count,
-      description: pubInfo.description,
-      message: 'Public repository detected. Ready to connect!',
-    });
-  } catch (pubErr) {
-    // 2. Anonymous failed (404/403) -> Private or requires token
-    if (cleanToken) {
-      try {
-        const privInfo = await githubService.getRepoInfo(owner, repo, cleanToken);
-        return res.json({
-          is_private: true,
-          requires_token: false,
-          token_valid: true,
-          owner,
-          repo,
-          name: privInfo.name || repo,
-          language: privInfo.language,
-          message: 'Private repository verified with Personal Access Token.',
-        });
-      } catch (tokErr) {
-        return res.json({
-          is_private: true,
-          requires_token: true,
-          token_valid: false,
-          error: 'Invalid Personal Access Token or repository not accessible.',
-        });
-      }
+    if (!pubInfo.private) {
+      return res.json({
+        is_private: false,
+        requires_token: false,
+        owner,
+        repo,
+        name: pubInfo.name || repo,
+        language: pubInfo.language,
+        stars: pubInfo.stargazers_count,
+        description: pubInfo.description,
+        using_saved_pat: false,
+        message: 'Public repository detected. Ready to connect without any PAT!',
+      });
     }
-
-    return res.json({
-      is_private: true,
-      requires_token: true,
-      owner,
-      repo,
-      message: 'Private repository detected. Personal Access Token (PAT) is required.',
-    });
+  } catch (pubErr) {
+    // Repo is not accessible anonymously -> treat as private
   }
+
+  // 2. Private repository detected: check if effectiveToken (or saved profile PAT) works
+  if (effectiveToken) {
+    try {
+      const privInfo = await githubService.getRepoInfo(owner, repo, effectiveToken);
+      return res.json({
+        is_private: true,
+        requires_token: false,
+        token_valid: true,
+        using_saved_pat: !cleanToken && !!userProfileToken,
+        owner,
+        repo,
+        name: privInfo.name || repo,
+        language: privInfo.language,
+        message: !cleanToken && userProfileToken
+          ? 'Private repository verified with your saved Profile PAT!'
+          : 'Private repository verified with provided Personal Access Token.',
+      });
+    } catch (tokErr) {
+      return res.json({
+        is_private: true,
+        requires_token: true,
+        token_valid: false,
+        has_saved_pat: !!userProfileToken,
+        error: 'Invalid Personal Access Token or repository not accessible.',
+        message: 'Private repository detected. A valid Personal Access Token (PAT) is required.',
+      });
+    }
+  }
+
+  // 3. Private repository and no token available
+  return res.json({
+    is_private: true,
+    requires_token: true,
+    token_valid: false,
+    has_saved_pat: !!userProfileToken,
+    owner,
+    repo,
+    message: 'Private repository detected. Personal Access Token (PAT) is required.',
+  });
 }
 
 /**

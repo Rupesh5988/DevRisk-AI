@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { getHealth, updateProfile, changePassword, getBenchmarkMetrics } from '../services/api';
+import { getHealth, updateProfile, changePassword, getBenchmarkMetrics, verifyGithubToken } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { 
@@ -28,7 +28,10 @@ import {
   Save,
   CheckCircle2,
   AlertCircle,
-  FolderGit2
+  FolderGit2,
+  Eye,
+  EyeOff,
+  ExternalLink
 } from 'lucide-react';
 
 const SUB_SETTINGS = [
@@ -50,18 +53,18 @@ export default function Settings() {
   const [benchmarkMetrics, setBenchmarkMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Profile Form State
+  // Profile Form State strictly tied to authenticated user (no cross-user leakage)
   const [fullName, setFullName] = useState(user?.full_name || '');
   const [email, setEmail] = useState(user?.email || '');
-  const [engineeringRole, setEngineeringRole] = useState(() => localStorage.getItem('devrisk_role') || 'Senior Tech Lead & Code Reviewer');
-  const [githubHandle, setGithubHandle] = useState(() => localStorage.getItem('devrisk_github_handle') || user?.username || '');
+  const [engineeringRole, setEngineeringRole] = useState(user?.engineering_role || 'Developer');
+  const [githubHandle, setGithubHandle] = useState(user?.github_username || user?.username || '');
   const [githubToken, setGithubToken] = useState(user?.github_token || '');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileMessage, setProfileMessage] = useState(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('devrisk_avatar_url') || '');
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || '');
 
-  const handleAvatarUpload = (e) => {
+  const handleAvatarUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
@@ -69,26 +72,34 @@ export default function Settings() {
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const base64 = reader.result;
       setAvatarUrl(base64);
-      localStorage.setItem('devrisk_avatar_url', base64);
-      if (updateUser) {
-        updateUser({ avatar_url: base64 });
+      try {
+        const res = await updateProfile({ avatar_url: base64 });
+        if (updateUser && res.data?.user) {
+          updateUser(res.data.user);
+        }
+        setProfileMessage({ type: 'success', text: 'Profile photo updated successfully!' });
+      } catch (err) {
+        setProfileMessage({ type: 'error', text: 'Failed to save profile photo to server.' });
       }
-      setProfileMessage({ type: 'success', text: 'Profile photo updated successfully!' });
       setTimeout(() => setProfileMessage(null), 3500);
     };
     reader.readAsDataURL(file);
   };
 
-  const handleRemoveAvatar = () => {
+  const handleRemoveAvatar = async () => {
     setAvatarUrl('');
-    localStorage.removeItem('devrisk_avatar_url');
-    if (updateUser) {
-      updateUser({ avatar_url: '' });
+    try {
+      const res = await updateProfile({ avatar_url: '' });
+      if (updateUser && res.data?.user) {
+        updateUser(res.data.user);
+      }
+      setProfileMessage({ type: 'success', text: 'Profile photo reset to default initial avatar.' });
+    } catch (err) {
+      setProfileMessage({ type: 'error', text: 'Failed to reset profile photo.' });
     }
-    setProfileMessage({ type: 'success', text: 'Profile photo reset to default initial avatar.' });
     setTimeout(() => setProfileMessage(null), 3500);
   };
 
@@ -114,12 +125,71 @@ export default function Settings() {
     if (user) {
       setFullName(user.full_name || '');
       setEmail(user.email || '');
+      setEngineeringRole(user.engineering_role || 'Developer');
+      setGithubHandle(user.github_username || user.username || '');
       setGithubToken(user.github_token || '');
+      setAvatarUrl(user.avatar_url || '');
     }
   }, [user]);
 
+  const [showTokenPlain, setShowTokenPlain] = useState(false);
+  const [tokenTesting, setTokenTesting] = useState(false);
+  const [tokenTestResult, setTokenTestResult] = useState(null);
+
+  const handleTestToken = async () => {
+    const trimmed = githubToken.trim();
+    if (!trimmed) {
+      setTokenTestResult({
+        type: 'error',
+        text: 'Please enter a GitHub Personal Access Token to verify.',
+      });
+      return;
+    }
+    try {
+      setTokenTesting(true);
+      setTokenTestResult(null);
+      const res = await verifyGithubToken(trimmed);
+      setTokenTestResult({
+        type: 'success',
+        text: `✅ ${res.data.message || 'Token verified successfully!'}`,
+      });
+    } catch (err) {
+      setTokenTestResult({
+        type: 'error',
+        text: `❌ ${err.response?.data?.error || err.message || 'Verification failed.'}`,
+      });
+    } finally {
+      setTokenTesting(false);
+    }
+  };
+
+  const handleSavePatDirect = async () => {
+    try {
+      setIsSavingProfile(true);
+      setTokenTestResult(null);
+      const res = await updateProfile({
+        github_token: githubToken.trim() || null,
+      });
+      if (updateUser && res.data?.user) {
+        updateUser(res.data.user);
+      }
+      setTokenTestResult({
+        type: 'success',
+        text: '✅ GitHub Personal Access Token saved to profile successfully!',
+      });
+      setTimeout(() => setTokenTestResult(null), 4000);
+    } catch (err) {
+      setTokenTestResult({
+        type: 'error',
+        text: `❌ ${err.response?.data?.error || 'Failed to save token to profile.'}`,
+      });
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
   const handleSaveProfile = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     try {
       setIsSavingProfile(true);
       setProfileMessage(null);
@@ -127,14 +197,14 @@ export default function Settings() {
         full_name: fullName.trim(),
         email: email.trim(),
         github_token: githubToken.trim() || null,
+        engineering_role: engineeringRole.trim(),
+        github_username: githubHandle.trim(),
       });
-      localStorage.setItem('devrisk_role', engineeringRole);
-      localStorage.setItem('devrisk_github_handle', githubHandle);
       if (updateUser && res.data?.user) {
         updateUser(res.data.user);
       }
       setIsEditingProfile(false);
-      setProfileMessage({ type: 'success', text: 'Profile changes saved successfully!' });
+      setProfileMessage({ type: 'success', text: 'Profile changes and GitHub settings saved successfully!' });
       setTimeout(() => setProfileMessage(null), 4000);
     } catch (err) {
       const errMsg = err.response?.data?.error || 'Failed to update profile. Please try again.';
@@ -796,6 +866,33 @@ jobs:
                       {githubHandle ? `@${githubHandle}` : 'Not connected'}
                     </div>
                   </div>
+
+                  {/* Profile PAT Status Card */}
+                  <div style={{ padding: '14px 16px', background: 'var(--bg-glass)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)', gridColumn: '1 / -1' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        GitHub Personal Access Token (PAT)
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          padding: '3px 10px',
+                          borderRadius: 6,
+                          fontWeight: 600,
+                          background: githubToken ? 'rgba(34, 197, 94, 0.15)' : 'rgba(148, 163, 184, 0.12)',
+                          color: githubToken ? '#22c55e' : 'var(--text-muted)',
+                        }}
+                      >
+                        {githubToken ? '● Token Configured' : '○ Not Configured'}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginTop: 6, fontFamily: 'monospace' }}>
+                      {githubToken ? `${githubToken.slice(0, 6)}••••••••••••••••••••••••••••••••` : 'Not saved (Optional for public repositories)'}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 6 }}>
+                      💡 When saved in your profile, this token is automatically used for connecting private repositories and bypassing GitHub unauthenticated rate limits.
+                    </div>
+                  </div>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
@@ -919,6 +1016,96 @@ jobs:
                         outline: 'none',
                       }}
                     />
+                  </div>
+
+                  {/* GitHub PAT Input Field in Profile Form */}
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        GitHub Personal Access Token (PAT)
+                      </label>
+                      <a
+                        href="https://github.com/settings/tokens"
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontSize: 11.5, color: 'var(--accent-primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <span>Generate Token on GitHub</span>
+                        <ExternalLink size={12} />
+                      </a>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <input
+                          type={showTokenPlain ? 'text' : 'password'}
+                          value={githubToken}
+                          onChange={(e) => {
+                            setGithubToken(e.target.value);
+                            setTokenTestResult(null);
+                          }}
+                          placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (Optional for public repos)"
+                          style={{
+                            width: '100%',
+                            padding: '9px 40px 9px 14px',
+                            borderRadius: 'var(--radius-md)',
+                            background: 'var(--bg-input)',
+                            border: '1px solid var(--border-medium)',
+                            color: 'var(--text-primary)',
+                            fontSize: 13,
+                            fontFamily: 'monospace',
+                            outline: 'none',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowTokenPlain(!showTokenPlain)}
+                          style={{
+                            position: 'absolute',
+                            right: 12,
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--text-muted)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                          }}
+                          title={showTokenPlain ? 'Hide token' : 'Show token'}
+                        >
+                          {showTokenPlain ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={handleTestToken}
+                        disabled={tokenTesting || !githubToken}
+                        style={{ padding: '9px 16px', fontSize: 12, whiteSpace: 'nowrap' }}
+                      >
+                        {tokenTesting ? 'Testing...' : 'Test Token'}
+                      </button>
+                    </div>
+
+                    {tokenTestResult && (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          padding: '8px 12px',
+                          borderRadius: 6,
+                          fontSize: 12,
+                          background: tokenTestResult.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                          color: tokenTestResult.type === 'success' ? '#22c55e' : '#ef4444',
+                          border: `1px solid ${tokenTestResult.type === 'success' ? 'rgba(34, 197, 94, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+                        }}
+                      >
+                        {tokenTestResult.text}
+                      </div>
+                    )}
+
+                    <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5 }}>
+                      💡 Saved in your profile database and automatically utilized whenever connecting private repositories or syncing PRs.
+                    </span>
                   </div>
                 </div>
 
@@ -1174,36 +1361,86 @@ jobs:
                 </span>
               </div>
               <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.4 }}>
-                Required for scanning private codebases, AST file AST dependency parsing, and posting automated PR comment reviews.
+                Required for scanning private codebases, AST file dependency parsing, and posting automated PR comment reviews.
               </p>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input
-                  type="password"
-                  value={githubToken}
-                  onChange={(e) => setGithubToken(e.target.value)}
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                  style={{
-                    flex: 1,
-                    padding: '8px 12px',
-                    borderRadius: 'var(--radius-md)',
-                    background: 'var(--bg-input)',
-                    border: '1px solid var(--border-medium)',
-                    color: 'var(--text-primary)',
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                    outline: 'none',
-                  }}
-                />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
+                  <input
+                    type={showTokenPlain ? 'text' : 'password'}
+                    value={githubToken}
+                    onChange={(e) => {
+                      setGithubToken(e.target.value);
+                      setTokenTestResult(null);
+                    }}
+                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    style={{
+                      width: '100%',
+                      padding: '8px 36px 8px 12px',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--bg-input)',
+                      border: '1px solid var(--border-medium)',
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      outline: 'none',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTokenPlain(!showTokenPlain)}
+                    style={{
+                      position: 'absolute',
+                      right: 10,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                    title={showTokenPlain ? 'Hide token' : 'Show token'}
+                  >
+                    {showTokenPlain ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={handleSaveProfile}
-                  disabled={isSavingProfile}
+                  onClick={handleTestToken}
+                  disabled={tokenTesting || !githubToken}
                   style={{ padding: '8px 14px', fontSize: 12 }}
                 >
-                  Save PAT
+                  {tokenTesting ? 'Testing...' : 'Test Token'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleSavePatDirect}
+                  disabled={isSavingProfile}
+                  style={{ padding: '8px 16px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Save size={13} />
+                  <span>{isSavingProfile ? 'Saving...' : 'Save Token to Profile'}</span>
                 </button>
               </div>
+
+              {tokenTestResult && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    background: tokenTestResult.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                    color: tokenTestResult.type === 'success' ? '#22c55e' : '#ef4444',
+                    border: `1px solid ${tokenTestResult.type === 'success' ? 'rgba(34, 197, 94, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+                  }}
+                >
+                  {tokenTestResult.text}
+                </div>
+              )}
             </div>
           </div>
 

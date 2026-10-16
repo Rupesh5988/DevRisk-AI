@@ -5,6 +5,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
+const githubService = require('../services/githubService');
 
 /**
  * Generate a JWT token for a user.
@@ -69,6 +70,9 @@ async function register(req, res) {
         username: user.username,
         email: user.email,
         full_name: user.full_name,
+        avatar_url: null,
+        engineering_role: 'Developer',
+        github_username: user.username,
         created_at: user.created_at,
       },
     });
@@ -92,7 +96,7 @@ async function login(req, res) {
 
     // Find user by email
     const result = await pool.query(
-      'SELECT id, username, email, password_hash, full_name, created_at FROM users WHERE email = $1',
+      'SELECT id, username, email, password_hash, full_name, avatar_url, engineering_role, github_username, created_at FROM users WHERE email = $1',
       [email]
     );
 
@@ -120,6 +124,9 @@ async function login(req, res) {
         username: user.username,
         email: user.email,
         full_name: user.full_name,
+        avatar_url: user.avatar_url || null,
+        engineering_role: user.engineering_role || 'Developer',
+        github_username: user.github_username || user.username,
         created_at: user.created_at,
       },
     });
@@ -136,7 +143,7 @@ async function login(req, res) {
 async function getMe(req, res) {
   try {
     const result = await pool.query(
-      `SELECT u.id, u.username, u.email, u.full_name, u.created_at,
+      `SELECT u.id, u.username, u.email, u.full_name, u.avatar_url, u.engineering_role, u.github_username, u.github_token, u.created_at,
               COUNT(r.id) AS repo_count
        FROM users u
        LEFT JOIN repositories r ON r.user_id = u.id
@@ -144,6 +151,10 @@ async function getMe(req, res) {
        GROUP BY u.id`,
       [req.user.id]
     );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
     res.json({ user: result.rows[0] });
   } catch (err) {
@@ -154,11 +165,11 @@ async function getMe(req, res) {
 
 /**
  * PUT /api/auth/profile
- * Update user full_name, email, or github_token.
+ * Update user full_name, email, github_token, avatar_url, engineering_role, or github_username.
  */
 async function updateProfile(req, res) {
   try {
-    const { full_name, email, github_token } = req.body;
+    const { full_name, email, github_token, avatar_url, engineering_role, github_username } = req.body;
 
     // Check if email is already in use by another account
     if (email) {
@@ -171,14 +182,31 @@ async function updateProfile(req, res) {
       }
     }
 
+    // Determine token update behavior:
+    // If github_token is present in req.body, allow updating to string or clearing to NULL
+    const tokenProvided = github_token !== undefined;
+    const cleanToken = github_token && github_token.trim() ? github_token.trim() : null;
+
     const result = await pool.query(
       `UPDATE users
        SET full_name = COALESCE($1, full_name),
            email = COALESCE($2, email),
-           github_token = COALESCE($3, github_token)
-       WHERE id = $4
-       RETURNING id, username, email, full_name, github_token, created_at`,
-      [full_name, email, github_token, req.user.id]
+           github_token = CASE WHEN $3 = TRUE THEN $4 ELSE github_token END,
+           avatar_url = CASE WHEN $5::text IS NOT NULL THEN $5 ELSE avatar_url END,
+           engineering_role = COALESCE($6, engineering_role),
+           github_username = COALESCE($7, github_username)
+       WHERE id = $8
+       RETURNING id, username, email, full_name, avatar_url, engineering_role, github_username, github_token, created_at`,
+      [
+        full_name,
+        email,
+        tokenProvided,
+        cleanToken,
+        avatar_url === '' ? null : avatar_url,
+        engineering_role,
+        github_username,
+        req.user.id
+      ]
     );
 
     res.json({
@@ -188,6 +216,34 @@ async function updateProfile(req, res) {
   } catch (err) {
     console.error('[Auth] updateProfile error:', err.message);
     res.status(500).json({ error: 'Failed to update profile.' });
+  }
+}
+
+/**
+ * POST /api/auth/verify-github-token
+ * Validates a GitHub Personal Access Token against the GitHub API.
+ */
+async function verifyGithubToken(req, res) {
+  try {
+    const tokenToTest = (req.body?.token && req.body.token.trim()) || req.user?.github_token || null;
+    if (!tokenToTest) {
+      return res.status(400).json({ error: 'No Personal Access Token provided to test.' });
+    }
+
+    const info = await githubService.verifyToken(tokenToTest);
+    return res.json({
+      valid: true,
+      username: info.login,
+      name: info.name,
+      avatar_url: info.avatar_url,
+      scopes: info.scopes,
+      message: `Token verified successfully for GitHub user @${info.login} (Scopes: ${info.scopes || 'default'})`,
+    });
+  } catch (err) {
+    return res.status(400).json({
+      valid: false,
+      error: err.response?.data?.message || err.message || 'Invalid GitHub Personal Access Token.',
+    });
   }
 }
 
@@ -236,4 +292,4 @@ async function changePassword(req, res) {
   }
 }
 
-module.exports = { register, login, getMe, updateProfile, changePassword };
+module.exports = { register, login, getMe, updateProfile, verifyGithubToken, changePassword };

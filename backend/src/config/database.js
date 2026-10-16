@@ -42,8 +42,18 @@ async function initializeTables() {
         password_hash VARCHAR(200) NOT NULL,
         full_name     VARCHAR(200),
         github_token  VARCHAR(500),
+        avatar_url    TEXT,
+        engineering_role VARCHAR(200),
+        github_username VARCHAR(200),
         created_at    TIMESTAMP DEFAULT NOW()
       );
+    `);
+
+    // Ensure user profile columns exist if table was already created
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS engineering_role VARCHAR(200);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS github_username VARCHAR(200);
     `);
 
     // 1. Repositories table (linked to users)

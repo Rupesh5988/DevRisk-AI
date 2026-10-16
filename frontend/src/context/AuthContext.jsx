@@ -41,6 +41,11 @@ export function AuthProvider({ children }) {
   }, []);
 
   function login(token, userData) {
+    // Clear any previous user's legacy cached profile keys to prevent leakage
+    localStorage.removeItem('devrisk_avatar_url');
+    localStorage.removeItem('devrisk_role');
+    localStorage.removeItem('devrisk_github_handle');
+
     localStorage.setItem('devrisk_token', token);
     localStorage.setItem('devrisk_user', JSON.stringify(userData));
     setUser(userData);
@@ -55,6 +60,9 @@ export function AuthProvider({ children }) {
   function logout() {
     localStorage.removeItem('devrisk_token');
     localStorage.removeItem('devrisk_user');
+    localStorage.removeItem('devrisk_avatar_url');
+    localStorage.removeItem('devrisk_role');
+    localStorage.removeItem('devrisk_github_handle');
     setUser(null);
   }
 

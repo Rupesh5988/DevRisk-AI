@@ -84,26 +84,129 @@ function parseDiffToFiles(diffText) {
 }
 
 /**
+ * Probes GitHub to verify if a repository is publicly accessible without any credentials.
+ */
+async function isRepoPublic(owner, repo) {
+  try {
+    // 1. Check GitHub API anonymously
+    const apiRes = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: { 'User-Agent': 'DevRisk-AI' },
+      timeout: 5000,
+    });
+    if (apiRes.status === 200 && apiRes.data && apiRes.data.private === false) {
+      return { isPublic: true, data: apiRes.data };
+    }
+  } catch (err) {
+    // If rate limited or API blocked, probe public web frontend
+    if (err.response && err.response.status === 403) {
+      try {
+        const webRes = await axios.get(`https://github.com/${owner}/${repo}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          timeout: 5000,
+          maxRedirects: 2,
+        });
+        if (webRes.status === 200) {
+          return { isPublic: true, data: null };
+        }
+      } catch (wErr) {
+        // Not reachable or private 404
+      }
+    }
+  }
+  return { isPublic: false, data: null };
+}
+
+/**
+ * Validates a GitHub Personal Access Token against GitHub API.
+ */
+async function verifyToken(token) {
+  if (!token || typeof token !== 'string' || !token.trim()) {
+    throw new Error('Personal Access Token is empty');
+  }
+  const clean = token.trim();
+  const res = await axios.get('https://api.github.com/user', {
+    headers: {
+      'Accept': 'application/vnd.github.v3+json',
+      'User-Agent': 'DevRisk-AI',
+      'Authorization': `token ${clean}`,
+    },
+    timeout: 8000,
+  });
+  return {
+    valid: true,
+    login: res.data.login,
+    name: res.data.name || res.data.login,
+    avatar_url: res.data.avatar_url,
+    scopes: res.headers['x-oauth-scopes'] || 'public_repo',
+  };
+}
+
+/**
  * Fetches repository metadata (language, default branch, etc.).
  */
 async function getRepoInfo(owner, repo, userToken = null, allowFallback = false) {
+  const token = userToken && userToken.trim() ? userToken.trim() : null;
+
+  // If token is provided, attempt authenticated access
+  if (token) {
+    try {
+      const client = new Octokit({ auth: token });
+      const { data } = await client.repos.get({ owner, repo });
+      return data;
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        // Check if repo is actually public despite invalid token
+        const pubCheck = await isRepoPublic(owner, repo);
+        if (pubCheck.isPublic && pubCheck.data) {
+          return pubCheck.data;
+        }
+        throw new Error(`GitHub Authentication Failed: ${err.message || 'Bad credentials'}. Please verify your Personal Access Token.`);
+      }
+      throw err;
+    }
+  }
+
+  // Token is NOT provided — this is a public repository access probe
   try {
-    const client = getOctokit(userToken);
+    // Try global token if valid, else pure anonymous
+    const client = (!isPlaceholder && globalToken) ? new Octokit({ auth: globalToken }) : new Octokit();
     const { data } = await client.repos.get({ owner, repo });
     return data;
   } catch (err) {
-    if (err.status === 401 || err.status === 403) {
-      if (!allowFallback) {
-        throw new Error(`GitHub Authentication Failed: ${err.message || 'Bad credentials'}. Please verify your Personal Access Token.`);
+    // If global token failed (401), retry pure anonymous
+    if (err.status === 401) {
+      try {
+        const anonClient = new Octokit();
+        const { data } = await anonClient.repos.get({ owner, repo });
+        return data;
+      } catch (anonErr) {
+        // Fall through to public check
       }
     }
-    console.warn(`[GitHubService] Octokit getRepoInfo failed for ${owner}/${repo}: ${err.message}. Trying direct REST...`);
+
+    // Direct anonymous REST
     try {
-      const res = await axiosGitHubGet(`https://api.github.com/repos/${owner}/${repo}`, {}, userToken);
+      const res = await axios.get(`https://api.github.com/repos/${owner}/${repo}`, {
+        headers: { 'User-Agent': 'DevRisk-AI', 'Accept': 'application/vnd.github.v3+json' },
+        timeout: 8000,
+      });
       return res.data;
     } catch (axErr) {
+      // Check if repo is publicly accessible via web (e.g. rate limit on API)
+      const pubCheck = await isRepoPublic(owner, repo);
+      if (pubCheck.isPublic) {
+        if (pubCheck.data) return pubCheck.data;
+        return {
+          name: repo,
+          owner: { login: owner },
+          html_url: `https://github.com/${owner}/${repo}`,
+          private: false,
+          language: 'JavaScript',
+          default_branch: 'main',
+        };
+      }
+
       if (allowFallback) {
-        console.warn(`[GitHubService] Direct REST lookup failed: ${axErr.message}. Using URL fallback.`);
         return {
           name: repo,
           owner: { login: owner },
@@ -111,9 +214,6 @@ async function getRepoInfo(owner, repo, userToken = null, allowFallback = false)
           language: 'JavaScript',
           default_branch: 'main',
         };
-      }
-      if (axErr.response && (axErr.response.status === 401 || axErr.response.status === 403)) {
-        throw new Error(`GitHub Authentication Failed: ${axErr.response.data?.message || 'Bad credentials'}. Please verify your Personal Access Token.`);
       }
       throw axErr;
     }
@@ -463,4 +563,6 @@ module.exports = {
   getRecentPRs,
   getRecentCommitsAsPRs,
   parseDiffToFiles,
+  isRepoPublic,
+  verifyToken,
 };

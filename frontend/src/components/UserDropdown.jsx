@@ -64,7 +64,7 @@ export default function UserDropdown() {
     navigate('/login');
   }
 
-  const avatarUrl = user.avatar_url || localStorage.getItem('devrisk_avatar_url');
+  const avatarUrl = user.avatar_url || '';
 
   return (
     <div className="top-user-menu" ref={dropdownRef}>
@@ -116,7 +116,7 @@ export default function UserDropdown() {
               <div className="user-dropdown-name">{user.full_name || user.username}</div>
               <div className="user-dropdown-email">{user.email || 'developer@devrisk.ai'}</div>
               <span className="user-dropdown-role-badge">
-                {localStorage.getItem('devrisk_role') || user.role || 'Developer'}
+                {user.engineering_role || user.role || 'Developer'}
               </span>
             </div>
           </div>

@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { listRepos, addRepo, deleteRepo, checkRepoVisibility } from '../services/api';
 import { Trash2 } from 'lucide-react';
 
@@ -16,6 +17,7 @@ export default function Repositories({
   onCloseExternalModal = null 
 }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [repos, setRepos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -79,18 +81,23 @@ export default function Repositories({
             checking: false,
             is_private: true,
             requires_token: data.requires_token,
+            using_saved_pat: data.using_saved_pat,
             token_valid: data.token_valid,
             message: data.message || 'Private repository detected',
           });
-          // Automatically prompt developer by opening and focusing PAT input
+          // Only prompt for token if actually missing or invalid
           if (data.requires_token) {
             setShowTokenInput(true);
             setTimeout(() => tokenInputRef.current?.focus(), 150);
+          } else if (data.using_saved_pat) {
+            // Already verified with user's saved profile PAT!
+            setShowTokenInput(false);
           }
         } else {
           setVisibilityStatus({
             checking: false,
             is_private: false,
+            requires_token: false,
             message: 'Public repository — no token required',
           });
           if (!accessToken) {
@@ -616,20 +623,37 @@ export default function Repositories({
                     {visibilityStatus.checking ? (
                       <span style={{ color: 'var(--text-muted)' }}>🔍 Probing repository type...</span>
                     ) : visibilityStatus.is_private ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          color: '#eab308',
-                          background: 'rgba(234, 179, 8, 0.12)',
-                          padding: '4px 10px',
-                          borderRadius: 8,
-                          fontWeight: 600,
-                        }}
-                      >
-                        🔒 Private Repository Detected — Personal Access Token (PAT) Required
-                      </span>
+                      visibilityStatus.using_saved_pat ? (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            color: '#10b981',
+                            background: 'rgba(16, 185, 129, 0.12)',
+                            padding: '4px 10px',
+                            borderRadius: 8,
+                            fontWeight: 600,
+                          }}
+                        >
+                          🔒 Private Repository — Verified using your Profile PAT ✅
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            color: '#eab308',
+                            background: 'rgba(234, 179, 8, 0.12)',
+                            padding: '4px 10px',
+                            borderRadius: 8,
+                            fontWeight: 600,
+                          }}
+                        >
+                          🔒 Private Repository Detected — Personal Access Token (PAT) Required
+                        </span>
+                      )
                     ) : (
                       <span
                         style={{
@@ -646,6 +670,29 @@ export default function Repositories({
                         🌐 Public Repository — Ready to Connect (No Token Needed)
                       </span>
                     )}
+                  </div>
+                )}
+
+                {/* Profile PAT Info Notice */}
+                {user?.github_token && (
+                  <div
+                    style={{
+                      marginBottom: 12,
+                      padding: '8px 12px',
+                      borderRadius: 6,
+                      background: 'rgba(99, 102, 241, 0.08)',
+                      border: '1px solid rgba(99, 102, 241, 0.25)',
+                      fontSize: 11.5,
+                      color: 'var(--text-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <span>🔑</span>
+                    <span>
+                      <strong style={{ color: 'var(--accent-primary)' }}>Profile PAT Active:</strong> Your saved profile token will be used automatically for private repos.
+                    </span>
                   </div>
                 )}
 
