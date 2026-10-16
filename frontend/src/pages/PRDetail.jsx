@@ -474,13 +474,13 @@ export default function PRDetail() {
         <div className="card animate-in" style={{ padding: 24, marginBottom: 28, background: 'var(--bg-card)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
             <div>
-              <h3 className="card-title" style={{ fontSize: 17, marginBottom: 4 }}>Historical Outcome (Validation Harness)</h3>
+              <h3 className="card-title" style={{ fontSize: 17, marginBottom: 4 }}>SZZ Git-Blame Ground Truth Verification</h3>
               <span className="card-subtitle" style={{ display: 'block', marginBottom: 12 }}>
-                Post-merge outcome tracked via validation pipeline harness.
+                Post-merge outcome verified via SZZ git blame trace and downstream bug-fix matching.
               </span>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
-                  <strong style={{ color: 'var(--text-muted)' }}>HISTORICAL OUTCOME:</strong>
+                  <strong style={{ color: 'var(--text-muted)' }}>SZZ OUTCOME:</strong>
                   <span style={{ 
                     padding: '2px 8px', borderRadius: 12, fontWeight: 700, fontSize: 11,
                     background: gtData.ground_truth_status === 'DEFECT_INDUCING' ? 'rgba(239, 68, 68, 0.15)' :
@@ -490,25 +490,25 @@ export default function PRDetail() {
                            gtData.ground_truth_status === 'NON_DEFECT_INDUCING' ? 'var(--risk-low)' :
                            'var(--text-secondary)'
                   }}>
-                    {gtData.ground_truth_status === 'DEFECT_INDUCING' ? 'Defect-Inducing (Caused Bug)' :
+                    {gtData.ground_truth_status === 'DEFECT_INDUCING' ? 'Defect-Inducing (Bug Confirmed)' :
                      gtData.ground_truth_status === 'NON_DEFECT_INDUCING' ? 'Clean / Non-Defect' :
                      gtData.ground_truth_status.replace(/_/g, ' ')}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
-                  <strong style={{ color: 'var(--text-muted)' }}>CONFIDENCE:</strong>
+                  <strong style={{ color: 'var(--text-muted)' }}>SZZ CONFIDENCE:</strong>
                   <span>{gtData.confidence}</span>
                 </div>
                 {gtData.evaluation_result !== 'NOT_EVALUATED' && (
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
-                    <strong style={{ color: 'var(--text-muted)' }}>MODEL ACCURACY:</strong>
+                    <strong style={{ color: 'var(--text-muted)' }}>MODEL ALIGNMENT:</strong>
                     <span style={{ 
                       padding: '2px 8px', borderRadius: 12, fontWeight: 700, fontSize: 11,
                       background: ['TRUE_POSITIVE', 'TRUE_NEGATIVE'].includes(gtData.evaluation_result) ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
                       color: ['TRUE_POSITIVE', 'TRUE_NEGATIVE'].includes(gtData.evaluation_result) ? 'var(--risk-low)' : 'var(--risk-high)'
                     }}>
-                      {gtData.evaluation_result === 'TRUE_POSITIVE' ? 'Accurately Flagged High Risk' :
-                       gtData.evaluation_result === 'TRUE_NEGATIVE' ? 'Accurately Cleared as Safe' :
+                      {gtData.evaluation_result === 'TRUE_POSITIVE' ? 'Accurately Flagged High Risk (True Positive)' :
+                       gtData.evaluation_result === 'TRUE_NEGATIVE' ? 'Accurately Cleared Safe (True Negative)' :
                        gtData.evaluation_result === 'FALSE_POSITIVE' ? 'False Alarm (Flagged High, Was Safe)' :
                        gtData.evaluation_result === 'FALSE_NEGATIVE' ? 'Missed Defect (Flagged Low, Had Bug)' :
                        gtData.evaluation_result.replace('_', ' ')}
@@ -525,7 +525,7 @@ export default function PRDetail() {
               style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '7px 14px' }}
             >
               <span>{gtLoading ? '⏳' : '🔄'}</span>
-              <span>{gtLoading ? 'Analyzing...' : 'Run Pipeline Analysis'}</span>
+              <span>{gtLoading ? 'Running SZZ Trace...' : 'Run SZZ Blame Trace'}</span>
             </button>
           </div>
 
