@@ -261,7 +261,12 @@ async function syncRepo(req, res) {
       recentPRs = await githubService.getRecentPRs(owner, repo, 100, repoToken);
     } catch (authErr) {
       console.warn(`[RepoController] Auth error during getRecentPRs:`, authErr.message);
-      return res.status(401).json({ error: authErr.message });
+      return res.status(400).json({
+        error: authErr.message,
+        github_auth_error: true,
+        requires_pat: true,
+        message: 'GitHub Authentication Failed: Bad credentials or repository is private. Please enter a valid Personal Access Token (PAT) with "repo" scope below.',
+      });
     }
 
     // If 0 PRs found in GitHub's PR API, automatically fall back to recent commits & merge PRs!
@@ -273,8 +278,13 @@ async function syncRepo(req, res) {
           isFromCommits = true;
         }
       } catch (commitErr) {
-        if (commitErr.message.includes('Authentication Failed') || commitErr.message.includes('Access Denied')) {
-          return res.status(401).json({ error: commitErr.message });
+        if (commitErr.message.includes('Authentication Failed') || commitErr.message.includes('Access Denied') || commitErr.message.includes('Bad credentials')) {
+          return res.status(400).json({
+            error: commitErr.message,
+            github_auth_error: true,
+            requires_pat: true,
+            message: 'GitHub Authentication Failed: Bad credentials or repository is private. Please enter a valid Personal Access Token (PAT) with "repo" scope below.',
+          });
         }
         console.warn(`[RepoController] Commit sync fallback error:`, commitErr.message);
       }

@@ -45,7 +45,10 @@ export default function RepoDetail() {
       setPatMessage({ type: 'success', text: `✅ ${res.data?.message || 'PRs synced successfully!'}` });
     } catch (err) {
       console.error('Failed to sync PRs:', err);
-      const msg = err.response?.data?.error || err.response?.data?.message || 'Failed to sync PRs from GitHub. Check your Personal Access Token or permissions.';
+      const msg =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        'Failed to sync PRs from GitHub. If this is a private repository, please enter a Personal Access Token below with "repo" scope.';
       setPatMessage({ type: 'error', text: `❌ ${msg}` });
     } finally {
       setSyncing(false);
@@ -205,11 +208,36 @@ export default function RepoDetail() {
           </button>
         </form>
         {patMessage && (
-          <div style={{
-            marginTop: 10, fontSize: 12.5,
-            color: patMessage.type === 'success' ? 'var(--risk-low)' : 'var(--risk-high)',
-            fontWeight: 500
-          }}>
+          <div
+            style={{
+              marginTop: 12,
+              padding: '10px 14px',
+              borderRadius: 'var(--radius-sm, 6px)',
+              fontSize: 13,
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              background:
+                patMessage.type === 'success'
+                  ? 'rgba(34, 197, 94, 0.12)'
+                  : patMessage.type === 'info'
+                  ? 'rgba(99, 102, 241, 0.12)'
+                  : 'rgba(239, 68, 68, 0.12)',
+              border:
+                patMessage.type === 'success'
+                  ? '1px solid rgba(34, 197, 94, 0.35)'
+                  : patMessage.type === 'info'
+                  ? '1px solid rgba(99, 102, 241, 0.35)'
+                  : '1px solid rgba(239, 68, 68, 0.35)',
+              color:
+                patMessage.type === 'success'
+                  ? 'var(--risk-low)'
+                  : patMessage.type === 'info'
+                  ? 'var(--accent-primary)'
+                  : 'var(--risk-high)',
+            }}
+          >
             {patMessage.text}
           </div>
         )}

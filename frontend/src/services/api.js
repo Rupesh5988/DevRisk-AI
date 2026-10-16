@@ -20,16 +20,44 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Auto-logout on 401
+// Auto-logout ONLY on actual DevRisk session expiry (never on GitHub/repository errors)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Token expired or invalid — clear and redirect
-      localStorage.removeItem('devrisk_token');
-      localStorage.removeItem('devrisk_user');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+    const status = error.response?.status;
+    const data = error.response?.data;
+    const url = error.config?.url || '';
+
+    // Ignore GitHub PAT, repository sync, and external token errors
+    const isGithubOrRepoError =
+      data?.github_auth_error ||
+      data?.token_invalid ||
+      data?.requires_token ||
+      data?.requires_pat ||
+      url.includes('/repos') ||
+      url.includes('/sync') ||
+      (typeof data?.error === 'string' && (
+        data.error.toLowerCase().includes('github') ||
+        data.error.toLowerCase().includes('personal access token') ||
+        data.error.toLowerCase().includes('bad credentials')
+      ));
+
+    if (status === 401 && !isGithubOrRepoError) {
+      // Check specifically if DevRisk app JWT is missing, expired, or invalid
+      const errMsg = typeof data?.error === 'string' ? data.error.toLowerCase() : '';
+      const isDevRiskSessionFailure =
+        errMsg.includes('token') ||
+        errMsg.includes('log in') ||
+        errMsg.includes('authentication required') ||
+        errMsg.includes('user not found') ||
+        url.startsWith('/auth/me');
+
+      if (isDevRiskSessionFailure) {
+        localStorage.removeItem('devrisk_token');
+        localStorage.removeItem('devrisk_user');
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
       }
     }
     return Promise.reject(error);
